@@ -42,7 +42,7 @@ window.addEventListener('error', e => {
 // =====================================================================================
 // CONFIG - every number you are likely to tune lives here.
 // =====================================================================================
-const GAME_VERSION = '3.7'; // bump on every revision (shown on the main menu)
+const GAME_VERSION = '3.8'; // bump on every revision (shown on the main menu)
 const CFG = {
   player: {
     speed: 4, radius: 0.3, maxHp: 100,
@@ -87,7 +87,7 @@ const CFG = {
   spider: { damage: 14, cooldown: 2.2, wind: 0.5, range: 14, hold: 8, puddle: 1.1 },   // ceiling spider: spits an acid glob from above, bites when you walk under it
   arena: { baseCount: 6, hpPerLevel: 0.12, dmgShare: 0.5, speedShare: 0.2, speedCap: 1.4, maxSniper: 2, startArmor: 100 },   // Nightmare Arena: enemies get (1 + hpPerLevel x (level-1)) x health; damage and speed rise by a share of that
   thrower: { shots: 7, speed: 13, damage: 22, cooldown: 2.1, wind: 0.55, refillTime: 0.25, near: 4, far: 14, lead: 0.85 },   // slime thrower robot: lobbed globs, refills from acid pools
-  acid: { stream: { perShot: 5, speed: 18, gravity: 7, dmg: 6.5, strip: 0.012, puddleLife: 8, refill: 55, refillRange: 1.6 }, robotDps: 28, strip: 0.06, puddleLife: 10, puddleDps: 14, bomber: { blast: 90, radius: 4.3, puddle: 3.0, deadBlast: 45, deadRadius: 3.0, deadPuddle: 2.0, chain: 5, fuse: 0.3 } },   // dynamic puddles (bomber, player stream, globs): damage per second to robots / the player, armour stripped per second, seconds they last
+  acid: { stream: { perShot: 5, speed: 18, gravity: 7, dmg: 6.5, strip: 0.012, puddleLife: 8, refill: 55, refillRange: 1.6 }, robotDps: 28, strip: 0.06, puddleLife: 10, puddleDps: 14, bomber: { blast: 60, radius: 3.8, puddle: 3.0, deadBlast: 35, deadRadius: 3.0, deadPuddle: 2.0, chain: 5, fuse: 0.3 } },   // dynamic puddles (bomber, player stream, globs): damage per second to robots / the player, armour stripped per second, seconds they last
   slime: { dps: 14, tick: 0.25, pools: [3, 6], poolSize: [1, 2], sections: [2], wallFaces: [8, 14], wallDps: 12, wallTick: 0.3, armorAbsorb: 0.75 },   // acid: floor pools (robots avoid them), wall slime (hurts on contact); armour soaks 75% of acid
   lava: { dps: 22, tick: 0.25, pools: [3, 6], poolSize: [1, 2], sections: [1] },   // pools per level (grows with the level), pool radius in cells, sections that have lava (0-based)
   bosses: {
@@ -121,7 +121,7 @@ const CFG = {
   },
   unlock: { rusher: 5, heavy: 9, sniper: 13, bomber: 17, thrower: 21, stealth: 25, spider: 28 },          // first level each robot type can appear on
   // share of a level's robots that are rushers / heavies once unlocked: start + grow per level since the unlock, capped at max
-  mix: { rusher: { start: 0.15, grow: 0.03, max: 0.45 }, heavy: { start: 0.10, grow: 0.012, max: 0.30 }, sniper: { start: 0.14, grow: 0.03, max: 0.28 }, stealth: { start: 0.18, grow: 0.03, max: 0.3 }, bomber: { start: 0.22, grow: 0.025, max: 0.42 }, thrower: { start: 0.18, grow: 0.035, max: 0.36 }, spider: { start: 0.14, grow: 0.04, max: 0.3 } },
+  mix: { rusher: { start: 0.15, grow: 0.03, max: 0.45 }, heavy: { start: 0.10, grow: 0.012, max: 0.30 }, sniper: { start: 0.12, grow: 0.02, max: 0.2 }, stealth: { start: 0.18, grow: 0.03, max: 0.3 }, bomber: { start: 0.12, grow: 0.02, max: 0.25 }, thrower: { start: 0.18, grow: 0.035, max: 0.36 }, spider: { start: 0.14, grow: 0.04, max: 0.3 } },
   // difficulty 0..1 (speed, fire rate, sight, damage, health): rises within a section, with a higher floor each section
   difficulty: { within: 0.6, perSection: 0.2 },
   // hp is a multiplier on the level's base robot health
@@ -158,7 +158,9 @@ function levelPlan(n) {
   if (n >= CFG.unlock.sniper && !c.sniper && !boss) c.sniper = 1;                        // a sniper is always out there once unlocked
   for (const t of SPECIALS) if (n === CFG.unlock[t] && !c[t]) c[t] = 1;                    // a new type always shows up on the level that unlocks it
   const sum = () => SPECIALS.reduce((a, t) => a + c[t], 0);
-  while (sum() > total - 1) { // always at least one grunt: trim the biggest group (never the type that just unlocked)
+  if (c.sniper > 2) c.sniper = 2;                                                       // never more than two snipers
+  const minGrunt = boss ? 1 : Math.max(1, Math.ceil(total * 0.3)); // grunts stay at least ~30% of a level so the specials don't swamp it
+  while (sum() > total - minGrunt) { // trim the biggest group (never the type that just unlocked)
     let pick = null; for (const t of SPECIALS) if (c[t] > 0 && !(n === CFG.unlock[t] && c[t] <= 1) && (!pick || c[t] > c[pick])) pick = t;
     if (!pick) break; c[pick]--;
   }
