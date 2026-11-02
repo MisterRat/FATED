@@ -14,7 +14,7 @@ by [MrRat Gaming](https://github.mrrat.org/) &nbsp;·&nbsp; [Discord](https://di
 </div>
 
 ## The game
-Robots called **Clankers** have taken over. Clear each level of them, then reach the exit portal, which only opens once the last Clanker is down. There are **30 levels in 3 sections**, each ending in a boss:
+Robots called **Clankers** have taken over. Clear each level of them, then reach the exit portal, which only opens once the last Clanker is down and any required pickups on the level (weapons and hidden finds) have been collected. There are **30 levels in 3 sections**, each ending in a boss:
 
 | Section | Levels | Look and feel |
 |---|---|---|
