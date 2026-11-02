@@ -42,7 +42,7 @@ window.addEventListener('error', e => {
 // =====================================================================================
 // CONFIG - every number you are likely to tune lives here.
 // =====================================================================================
-const GAME_VERSION = '3.8'; // bump on every revision (shown on the main menu)
+const GAME_VERSION = '3.9'; // bump on every revision (shown on the main menu)
 const CFG = {
   player: {
     speed: 4, radius: 0.3, maxHp: 100,
@@ -5345,6 +5345,7 @@ function showNotice(title, sub) {
 }
 function setupRoom(n) {
   pendingAlerts.length = 0; libsClear();
+  flashOn = false; // every level starts with the flashlight off
   roomNumber = n;
   saveBest(n);
   if (levelInSection(n) === 0 && secLevel !== n) { secStart = { kills: run.kills, shots: run.shots, hits: run.hits, heads: run.heads, time: run.time }; secLevel = n; }
