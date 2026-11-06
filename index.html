@@ -42,7 +42,7 @@ window.addEventListener('error', e => {
 // =====================================================================================
 // CONFIG - every number you are likely to tune lives here.
 // =====================================================================================
-const GAME_VERSION = '3.11'; // bump on every revision (shown on the main menu)
+const GAME_VERSION = '3.12'; // bump on every revision (shown on the main menu)
 const CFG = {
   player: {
     speed: 4, radius: 0.3, maxHp: 100,
@@ -2625,7 +2625,8 @@ function vmFinger(g, pts, radii, mat, padMat) { // a jointed finger: tapered seg
     const a = pts[i - 1], b = pts[i + 1]; vdBand(g, pts[i], [b[0] - a[0], b[1] - a[1], b[2] - a[2]], radii[i] * 1.0, 0.0012, vmDark);
   }
 }
-function vmArm(g, a, b, w, watch) { // sleeve with a stitched glove gauntlet at the wrist, a rolled cuff and an optional watch
+function vmArm(g0, a, b, w, watch) {
+  const g = new THREE.Group(); g.userData.hand = true; g0.add(g); // sleeve with a stitched glove gauntlet at the wrist, a rolled cuff and an optional watch
   const A = new THREE.Vector3(a[0], a[1], a[2]), B = new THREE.Vector3(b[0], b[1], b[2]), d = B.clone().sub(A).normalize(), r = w * 0.46, at = (t) => A.clone().addScaledVector(d, t).toArray();
   vdTube(g, at(0.02), b, r * 0.78, r * 1.18, vmSleeve, 16);                          // forearm, widening to the elbow
   vdTube(g, a, at(0.07), r * 0.80, r * 0.88, vmGlove, 16);                            // gauntlet
@@ -2645,43 +2646,59 @@ function vmArm(g, a, b, w, watch) { // sleeve with a stitched glove gauntlet at 
   }
 }
 function vmGripHand(g, x, y, z, rx, o = {}) { // right hand wrapped round a grip centred at (x,y,z); o.trigger = world point for the index fingertip
-  const h = new THREE.Group(), gw = o.w || 0.056, gd = o.d || 0.085, hw = gw / 2, hd = gd / 2;
-  const rows = [0.036, 0.011, -0.014, -0.039], sc = [1, 1.08, 1, 0.82], rad = [0.0124, 0.0116, 0.0107, 0.01, 0.0088];
+  const h = new THREE.Group(); h.userData.hand = true; const gw = o.w || 0.056, gd = o.d || 0.085, hw = gw / 2, hd = gd / 2;
+  const rows = [0.036, 0.011, -0.014, -0.039], sc = [1, 1.08, 1, 0.82], rs = o.rs || 0.9, tu = o.thumbUp || 0, tb = o.thumbBack || 0, rad = [0.0124, 0.0116, 0.0107, 0.01, 0.0088].map(v => v * rs);
   // back of the hand and palm
   vdB(h, 0.016, 0.1, 0.082, vmGlove, hw + 0.026, 0.0, 0.02);                                // back of hand
-  vdB(h, 0.024, 0.092, 0.07, vmPad, hw + 0.008, 0.0, 0.016);                                 // padded palm
-  vdS(h, 0.03, vmGlove, hw + 0.02, -0.04, 0.05, 0.8, 1.15, 1.0);                             // heel of the hand
-  vdS(h, 0.027, vmGlove, hw + 0.016, 0.03, 0.05, 0.85, 1.1, 1.0);                            // thumb muscle
+  vdB(h, 0.024, 0.092, 0.07, vmPad, hw + 0.013, 0.0, 0.016);                                 // padded palm
+  vdS(h, 0.03, vmGlove, hw + 0.031, -0.04, 0.05, 0.8, 1.15, 1.0);                            // heel of the hand
+  vdS(h, 0.027, vmGlove, hw + 0.029, 0.03, 0.05, 0.85, 1.1, 1.0);                            // thumb muscle
   for (let i = 0; i < 4; i++) { vdS(h, 0.0105, vmRubber, hw + 0.037, rows[i], -0.012, 0.6, 1.0, 1.0); vdB(h, 0.006, 0.02, 0.012, vmDark, hw + 0.04, rows[i], -0.012); } // hard knuckle plates
   vdB(h, 0.004, 0.09, 0.0015, vmDark, hw + 0.0345, 0, 0.062);                                // stitched seam at the wrist
   // fingers
   const T = o.trigger ? new THREE.Vector3(o.trigger[0] - x, o.trigger[1] - y, o.trigger[2] - z).applyAxisAngle(new THREE.Vector3(1, 0, 0), -rx) : null;
   for (let i = 0; i < 4; i++) {
     const y0 = rows[i], s = sc[i], r = rad.map(v => v * (0.94 + 0.06 * s));
-    let pts;
-    if (i === 0 && T) pts = [[hw + 0.024, y0, -0.012], [hw + 0.014, (y0 + T.y) / 2 + 0.004, T.z + 0.07], [hw - 0.002, T.y + 0.003, T.z + 0.04], [0.012, T.y + 0.001, T.z + 0.016], [-0.004, T.y, T.z + 0.004]];
+    let pts; if (i === 0 && T) r.forEach((v, k) => r[k] = v * 0.86);
+    if (i === 0 && T) pts = [[hw + 0.024, y0, -0.012], [hw + 0.012, T.y - 0.002, T.z + 0.035], [hw + 0.004, T.y, T.z + 0.008], [0.012, T.y, T.z + 0.003], [-0.004, T.y, T.z + 0.001]];
     else pts = [[hw + 0.024, y0, -0.012], [hw + 0.004, y0, -hd - 0.009], [0.0, y0, -hd - 0.0145], [-hw - 0.011, y0, -hd + 0.01 * s], [-hw - 0.015, y0 + 0.001, -hd + 0.036 * s]];
     vmFinger(h, pts, r, vmGlove, vmPad);
   }
   // thumb along the left side
-  vmFinger(h, [[hw + 0.024, 0.014, 0.045], [hw + 0.002, 0.03, hd + 0.012], [-hw - 0.004, 0.038, hd - 0.004], [-hw - 0.014, 0.043, hd - 0.04], [-hw - 0.016, 0.046, hd - 0.062]], [0.0155, 0.0138, 0.0128, 0.0116, 0.0104], vmGlove, vmPad);
-  vdS(h, 0.0075, vmRubber, -hw - 0.012, 0.0545, hd - 0.04, 1, 0.5, 1.3);                     // thumb guard
+  vmFinger(h, [[hw + 0.024, 0.014 + tu, 0.045 + tb], [hw + 0.012, 0.03 + tu, hd + 0.012 + tb], [-hw - 0.012, 0.038 + tu, hd - 0.004 + tb], [-hw - 0.018, 0.043 + tu, hd - 0.04 + tb], [-hw - 0.019, 0.046 + tu, hd - 0.062 + tb]], [0.0155, 0.0138, 0.0128, 0.0116, 0.0104], vmGlove, vmPad);
+  vdS(h, 0.0075, vmRubber, -hw - 0.0185, 0.0545 + tu, hd - 0.04 + tb, 1, 0.5, 1.3);                     // thumb guard
   h.position.set(x, y, z); h.rotation.x = rx; g.add(h);
   vmArm(g, [x + 0.07, y - 0.03, z + 0.05], [x + 0.2, y - 0.32, z + 0.55], 0.085);
 }
 function vmCupHand(g, x, y, z, o = {}) { // left hand cupping a forend/handguard/foregrip from below; fingers wrap up the right side, thumb along the left
-  const h = new THREE.Group(), hw = o.w || 0.029, u = o.drop || 0.03, rad = [0.0125, 0.0118, 0.011, 0.0102, 0.009], sc = [1, 1.08, 1, 0.82];
+  const h = new THREE.Group(); h.userData.hand = true; const hw = o.w || 0.029, u = o.drop || 0.03, sp = o.sp || 0.024, rs = o.rs || 0.9, rad = [0.0125, 0.0118, 0.011, 0.0102, 0.009].map(v => v * rs), sc = [1, 1.08, 1, 0.82], zf = -1.5 * sp;
   vdB(h, hw * 2 + 0.03, 0.014, 0.08, vmPad, -0.004, -u - 0.01, 0.0);                          // padded palm
   vdS(h, 0.03, vmGlove, -hw - 0.03, -u - 0.008, 0.032, 1.0, 0.9, 0.9);                        // heel
   vdB(h, 0.012, 0.03, 0.088, vmGlove, -hw - 0.034, -u + 0.002, 0.0);                          // back of hand (faces the camera)
   vdB(h, 0.0025, 0.026, 0.084, vmDark, -hw - 0.0405, -u + 0.002, 0.0);
-  for (let i = 0; i < 4; i++) { const z0 = -0.036 + i * 0.024, s = sc[i], r = rad.map(v => v * (0.94 + 0.06 * s));
+  for (let i = 0; i < 4; i++) { const z0 = zf + i * sp, s = sc[i], r = rad.map(v => v * (0.94 + 0.06 * s));
     vmFinger(h, [[-hw - 0.024, -u - 0.004, z0], [-hw * 0.25, -u - 0.0115, z0], [hw + 0.004, -u - 0.0085, z0], [hw + 0.0115, -u + 0.018, z0], [hw + 0.01, -u + 0.04 * s, z0 + 0.002]], r, vmGlove, vmPad);
     vdS(h, 0.0105, vmRubber, -hw - 0.04, -u + 0.004, z0, 0.6, 1.0, 1.0); }                    // knuckle plates
-  vmFinger(h, [[-hw - 0.024, -u + 0.004, -0.044], [-hw - 0.016, -u + 0.026, -0.06], [-hw - 0.013, -u + 0.036, -0.086], [-hw - 0.012, -u + 0.04, -0.108]], [0.0155, 0.0138, 0.0124, 0.0108], vmGlove, vmPad);
+  vmFinger(h, [[-hw - 0.024, -u + 0.004, zf - 0.008], [-hw - 0.016, -u + 0.026, zf - 0.024], [-hw - 0.013, -u + 0.036, zf - 0.05], [-hw - 0.012, -u + 0.04, zf - 0.072]], [0.0155, 0.0138, 0.0124, 0.0108].map(v => v * rs), vmGlove, vmPad);
   vmArm(h, [-hw - 0.03, -u - 0.01, 0.05], [-0.2, -0.34, 0.55], 0.085, true);
   h.position.set(x, y, z); g.add(h);
   return h;
+}
+
+function vmWristHand(g, x, y, z, o) { // right hand wrapped round the wrist of a rifle stock: fingers pass under it and up the far side, thumb over the top
+  const h = new THREE.Group(); h.userData.hand = true;
+  const hw = o.w / 2, top = o.top, bot = o.bot, rs = o.rs || 0.9, sp = o.sp || 0.024, rad = [0.0124, 0.0116, 0.0107, 0.01, 0.0092, 0.0086].map(v => v * rs), sc = [1, 1.08, 1, 0.82], ymid = (top + bot) / 2;
+  const T = o.trigger ? new THREE.Vector3(o.trigger[0] - x, o.trigger[1] - y, o.trigger[2] - z) : null;
+  vdB(h, 0.016, top - bot + 0.02, 0.1, vmGlove, hw + 0.026, ymid - 0.01, 0.0);               // back of the hand
+  vdB(h, 0.024, top - bot, 0.09, vmPad, hw + 0.014, ymid - 0.01, 0.0);
+  vdS(h, 0.032, vmGlove, hw + 0.032, bot + 0.012, 0.045, 0.8, 1.0, 1.0);                      // heel of the hand
+  for (let i = 0; i < 4; i++) { const zi = (i - 1.5) * sp, s = sc[i], r = rad.map(v => v * (0.94 + 0.06 * s)); let pts;
+    if (i === 0 && T) { r.forEach((v, k) => r[k] = v * 0.86); pts = [[hw + 0.024, bot + 0.02, zi], [hw + 0.012, T.y - 0.002, T.z + 0.05], [hw + 0.004, T.y, T.z + 0.008], [0.012, T.y, T.z + 0.003], [-0.004, T.y, T.z + 0.001]]; }
+    else pts = [[hw + 0.024, bot + 0.02, zi], [hw + 0.0065, bot - 0.0075, zi], [0.0, bot - 0.0125, zi], [-hw - 0.0065, bot - 0.0075, zi], [-hw - 0.0125, bot + 0.019, zi], [-hw - 0.0115, bot + 0.04 * s, zi]];
+    vmFinger(h, pts, r, vmGlove, vmPad); vdS(h, 0.0105 * rs, vmRubber, hw + 0.04, bot + 0.02, zi, 0.6, 1.0, 1.0); }
+  vmFinger(h, [[hw + 0.024, ymid + 0.02, 0.05], [hw + 0.002, top + 0.012, 0.045], [-hw - 0.004, top + 0.011, 0.02], [-hw - 0.012, top - 0.002, -0.01], [-hw - 0.014, top - 0.004, -0.03]], [0.0155, 0.0138, 0.0128, 0.0116, 0.0104].map(v => v * rs), vmGlove, vmPad);
+  h.position.set(x, y, z); g.add(h);
+  vmArm(g, [x + 0.07, y - 0.03, z + 0.05], [x + 0.2, y - 0.32, z + 0.55], 0.085);
 }
 
 // --- rounded solids: profile outlines extruded with bevelled edges (no more sharp-edged blocks) ---
@@ -2728,8 +2745,8 @@ function makePistolModel() {
   mag.add(vmBox(0.045, 0.14, 0.065, vmSteel, 0, -0.1, 0.065, -0.28));             // magazine (hidden in grip)
   mag.add(vmRound(0.062, 0.016, 0.095, 0.008, vmDark, 0, -0.176, 0.088, -0.28));  // magazine base
   g.add(sl, mag);
-  vmGripHand(g, 0, -0.095, 0.065, -0.28, { trigger: [0, -0.0356, -0.034] });
-  const lh = vmCupHand(g, 0, -0.154, 0.07, { w: 0.031 });
+  vmGripHand(g, 0, -0.095, 0.065, -0.28, { trigger: [0, -0.0356, -0.034], w: 0.069, d: 0.092 });
+  const lh = vmCupHand(g, 0, -0.172, 0.07, { w: 0.037 });
   g.userData = { type: 'pistol', slide: sl, mag, lh };
   return g;
 }
@@ -2752,8 +2769,8 @@ function makeShotgunModel() {
   const bead = new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 8), vmDot);
   bead.position.set(0, 0.077, -0.35); g.add(bead);                                // front bead (top = sight line)
   vmRearSight(g, 0, 0.085, 0.1, 0.0725, { w: 0.007, gap: 0.022, up: 0.012, down: 0.008 });                                             // rear notch
-  vmGripHand(g, 0, -0.08, 0.205, -0.35, { trigger: [0, -0.0288, 0.076], w: 0.05, d: 0.07 });
-  const lh = vmCupHand(pump, 0, 0.001, -0.15, { w: 0.029 });
+  vmGripHand(g, 0, -0.08, 0.205, -0.35, { trigger: [0, -0.0288, 0.076], w: 0.056, d: 0.074, thumbUp: 0.008, thumbBack: 0.036 });
+  const lh = vmCupHand(pump, 0, 0.001, -0.15, { w: 0.032 });
   g.userData = { type: 'shotgun', pump, lh };
   return g;
 }
@@ -2777,14 +2794,14 @@ function makeGrenadeModel() {
   g.add(vmBox(0.06, 0.1, 0.14, vmGreen, 0, -0.03, 0.31));                         // stock
   g.add(vmBox(0.064, 0.12, 0.03, vmDark, 0, -0.04, 0.395));                       // butt pad
   g.add(vmBox(0.05, 0.14, 0.07, vmDark, 0, -0.11, 0.2, -0.3));                    // pistol grip
-  vmGuard(g, -0.06, 0.12, 0.028);
+  vmGuard(g, -0.078, 0.12, 0.028);
   g.add(vmBox(0.05, 0.03, 0.08, vmDark, 0, -0.05, -0.13));                        // foregrip mount
   g.add(vmBox(0.04, 0.125, 0.05, vmDark, 0, -0.108, -0.13));                      // vertical foregrip
   g.add(vmBox(0.014, 0.045, 0.014, vmDark, 0, 0.0625, -0.32));
   g.add(vmBox(0.006, 0.006, 0.001, vmOrange, 0, 0.0785, -0.3127));               // front dot                    // front post (top = sight line)
   vmRearSight(g, 0, 0.085, 0.14, 0.0775, { w: 0.011, gap: 0.022, up: 0.016, down: 0.005, dot: vmOrange });                                            // rear notch
-  vmGripHand(g, 0, -0.11, 0.2, -0.3, { trigger: [0, -0.0488, 0.126], w: 0.05, d: 0.07 });
-  const lh = vmCupHand(g, 0, -0.14, -0.13, { w: 0.021 });
+  vmGripHand(g, 0, -0.11, 0.2, -0.3, { trigger: [0, -0.0668, 0.126], w: 0.056, d: 0.076 });
+  const lh = vmCupHand(g, 0, -0.14, -0.13, { w: 0.023 });
   g.userData = { type: 'grenade', drum, lh };
   return g;
 }
@@ -2811,8 +2828,8 @@ function makeRifleModel() {
   mag.add(vmBox(0.036, 0.07, 0.065, vmSteel, 0, -0.135, -0.052, 0.15));
   mag.add(vmBox(0.036, 0.07, 0.065, vmSteel, 0, -0.2, -0.075, 0.3));
   g.add(bolt, mag);
-  vmGripHand(g, 0, -0.005, 0.2, -0.15, { trigger: [0, -0.0516, 0.026], w: 0.05, d: 0.07 });
-  const lh = vmCupHand(g, 0, 0.03, -0.17, { w: 0.026 });
+  vmWristHand(g, 0, -0.005, 0.15, { trigger: [0, -0.0516, 0.026], w: 0.054, top: 0.04, bot: -0.046 });
+  const lh = vmCupHand(g, 0, 0.03, -0.15, { w: 0.0275 });
   g.userData = { type: 'rifle', slide: bolt, mag, lh };
   return g;
 }
@@ -2830,10 +2847,10 @@ function makeSlimeModel() {
     g.add(vmCyl(0.029, 0.015, vmDark, sx * 0.8, 0.07, -0.06)); g.add(vmCyl(0.029, 0.015, vmDark, sx * 0.8, 0.07, 0.14));
   }
   g.add(vmBox(0.04, 0.06, 0.2, vmDark, 0, -0.01, 0.2));                           // stock
-  g.add(vmBox(0.035, 0.1, 0.04, vmDark, 0, -0.075, 0.06));                        // grip
+  g.add(vmBox(0.035, 0.13, 0.04, vmDark, 0, -0.09, 0.06, -0.2));                   // grip
   g.add(vmBox(0.012, 0.012, 0.012, new THREE.MeshBasicMaterial({ color: 0xaaff66 }), 0, 0.055, -0.1)); // sight dot
-  vmGripHand(g, 0, -0.08, 0.06, -0.2, { trigger: [0, -0.0362, 0.041], w: 0.036, d: 0.04 });
-  const lh = vmCupHand(g, 0, 0.018, -0.2, { w: 0.033 });
+  vmGripHand(g, 0, -0.102, 0.06, -0.2, { trigger: [0, -0.0602, 0.021], w: 0.04, d: 0.046, thumbUp: -0.012 });
+  const lh = vmCupHand(g, 0, 0.018, -0.2, { w: 0.036 });
   g.userData = { type: 'slime', lh, fills };
   return g;
 }
@@ -2846,10 +2863,10 @@ function makeRailModel() {
   g.add(vmBox(0.07, 0.08, 0.26, vmDark, 0, 0.0, 0.08));                           // capacitor housing
   g.add(vmBox(0.05, 0.02, 0.14, cyan, 0, 0.045, 0.08));                           // charge light bar
   g.add(vmBox(0.05, 0.07, 0.22, vmMetal, 0, -0.01, 0.28));                        // stock
-  g.add(vmBox(0.035, 0.1, 0.04, vmDark, 0, -0.07, 0.1));                          // grip
+  g.add(vmBox(0.035, 0.13, 0.04, vmDark, 0, -0.095, 0.1, -0.2));                   // grip
   g.add(vmBox(0.012, 0.012, 0.012, cyan, 0, 0.075, -0.05));                       // sight dot
-  vmGripHand(g, 0, -0.075, 0.1, -0.2, { trigger: [0, -0.035, 0.071], w: 0.036, d: 0.04 });
-  const lh = vmCupHand(g, 0, 0.031, -0.22, { w: 0.034 });
+  vmGripHand(g, 0, -0.1, 0.1, -0.2, { trigger: [0, -0.0602, 0.036], w: 0.04, d: 0.046, thumbUp: -0.012 });
+  const lh = vmCupHand(g, 0, 0.027, -0.155, { w: 0.0385, sp: 0.019, rs: 0.8 });
   g.userData = { type: 'rail', lh };
   return g;
 }
@@ -2857,9 +2874,9 @@ function makeSawModel() { // chainsaw bolted to the forearm
   const g = new THREE.Group();
   const orange = new THREE.MeshLambertMaterial({ color: 0xcc5511 }), bar = new THREE.MeshLambertMaterial({ color: 0x777c85 }), tooth = new THREE.MeshLambertMaterial({ color: 0xc8ccd4 });
   const top = new THREE.Group(), bot = new THREE.Group();
-  vmArm(g, [0.02, -0.04, -0.14], [0.1, -0.17, 0.5], 0.13);                  // forearm in a camo sleeve with a glove gauntlet at the wrist
+  vmArm(g, [0.03, -0.03, 0.01], [0.12, -0.17, 0.55], 0.13);                  // forearm in a camo sleeve with a glove gauntlet at the wrist
   g.add(vmBox(0.15, 0.14, 0.24, orange, 0, 0.0, -0.12));                   // motor housing
-  g.add(vmBox(0.05, 0.06, 0.05, vmDark, 0.0, 0.1, -0.08));                 // pull cap
+  g.add(vmBox(0.05, 0.06, 0.05, vmDark, 0.0, 0.1, -0.215));                // pull cap
   g.add(vmBox(0.04, 0.1, 0.52, bar, 0, 0.0, -0.5));                        // guide bar
   for (let i = 0; i < 13; i++) { top.add(vmBox(0.05, 0.018, 0.022, tooth, 0, 0.056, -0.27 - i * 0.04)); bot.add(vmBox(0.05, 0.018, 0.022, tooth, 0, -0.056, -0.27 - i * 0.04)); }
   g.add(top, bot);
@@ -2926,7 +2943,6 @@ function detailShotgun(g) {
   for (let i = 0; i < 4; i++) vdB(g, 0.013, 0.0015, 0.002, vmDark, 0, 0.075 + i * 0.001, 0.195 + i * 0.0035);
   const gp = new THREE.Group(); gp.position.set(0, -0.08, 0.205); gp.rotation.x = -0.35; g.add(gp);
   vdB(gp, 0.0012, 0.1, 0.052, vmChecker, 0.0256, 0, 0); vdB(gp, 0.0012, 0.1, 0.052, vmChecker, -0.0256, 0, 0);
-  vdB(gp, 0.05, 0.1, 0.0016, vmLeather, 0, 0, 0.0345);                                                     // leather back strap
   vdT(g, 0.01, 0.002, vmSteel, 0, -0.152, 0.236, 'x', 12);                                                 // sling swivel
 }
 function detailGrenade(g) {
@@ -2976,7 +2992,7 @@ function detailRifle(g) {
 function detailSlime(g) {
   const u = g.userData;
   vdC(g, 0.0345, 0.02, vmHazard, 0, 0.02, -0.12, 'z', 18); vdC(g, 0.034, 0.012, vmSteel, 0, 0.02, -0.3, 'z', 18);   // nozzle bands
-  for (let i = 0; i < 4; i++) vdC(g, 0.04, 0.005, vmDark, 0, 0.02, -0.17 - i * 0.04, 'z', 18);
+  for (let i = 0; i < 4; i++) vdC(g, 0.0345, 0.005, vmDark, 0, 0.02, -0.17 - i * 0.04, 'z', 18);
   // pressure gauge
   vdC(g, 0.021, 0.008, vmSteel, -0.0385, 0.0, 0.03, 'x', 22);
   const cv = document.createElement('canvas'); cv.width = cv.height = 128; const c = cv.getContext('2d'); c.fillStyle = '#e6e6d8'; c.fillRect(0, 0, 128, 128);
@@ -3002,7 +3018,7 @@ function detailSlime(g) {
   vmGuardSlime(g);
   vdB(g, 0.041, 0.06, 0.004, vmRubber, 0, -0.01, 0.302);                                                         // butt pad
 }
-function vmGuardSlime(g) { vmGuard(g, -0.045, 0.035, 0.022); }
+function vmGuardSlime(g) { vmGuard(g, -0.06, 0.015, 0.02); }
 function detailRail(g) {
   const u = g.userData;
   for (let k = 0; k < 18; k++) { const z = -0.03 - k * 0.032; vdB(g, 0.016, 0.0018, 0.005, vmDark, -0.02, 0.0435, z); vdB(g, 0.016, 0.0018, 0.005, vmDark, 0.02, 0.0435, z); }   // rail grooves
@@ -3017,7 +3033,7 @@ function detailRail(g) {
   vdDecal(g, 'RAIL-9  MK II', 0.1, 0.018, -0.0355, -0.02, 0.1, -1, 26, 'rgba(120,225,255,0.75)');
   vdB(g, 0.0012, 0.04, 0.2, vmChecker, 0.0256, -0.01, 0.28); vdB(g, 0.0012, 0.04, 0.2, vmChecker, -0.0256, -0.01, 0.28);
   vdB(g, 0.052, 0.07, 0.004, vmRubber, 0, -0.01, 0.392);
-  vmGuard(g, -0.045, 0.065, 0.025);
+  vmGuard(g, -0.06, 0.03, 0.025);
   for (let k = 0; k < 4; k++) vdScrew(g, -0.0355, -0.025 + (k % 2) * 0.05, 0.0 + Math.floor(k / 2) * 0.13, 'x', 0.004, vmSteel, -1);
 }
 function detailSaw(g) {
@@ -3027,18 +3043,17 @@ function detailSaw(g) {
   for (let k = 0; k < 6; k++) vdB(g, 0.152, 0.004, 0.026, vmVoid, 0, 0.03 - k * 0.012 + 0.03, -0.04);        // motor vents
   vdB(g, 0.0012, 0.06, 0.16, vmHazard, -0.0765, 0.0, -0.12);
   vdDecal(g, 'DANGER  CHAIN', 0.12, 0.02, -0.0765, 0.045, -0.12, -1, 26);
-  vdC(g, 0.02, 0.05, vmDark, 0.0, 0.1, -0.08, 'x', 14);                                                      // pull-start housing
-  vdTube(g, [0.0, 0.085, -0.02], [0.0, 0.085, -0.16], 0.012, 0.012, vmRubber, 12);                           // top handle bar
-  vdTube(g, [0.0, 0.07, -0.04], [0.0, 0.085, -0.04], 0.008, 0.008, vmSteel, 8); vdTube(g, [0.0, 0.07, -0.14], [0.0, 0.085, -0.14], 0.008, 0.008, vmSteel, 8);
-  for (let k = 0; k < 6; k++) vdBand(g, [0, 0.085, -0.03 - k * 0.02], [0, 0, 1], 0.0125, 0.0012, vmDark);
+  vdTube(g, [0.0, 0.11, -0.02], [0.0, 0.11, -0.16], 0.012, 0.012, vmRubber, 12);                              // top handle bar
+  vdTube(g, [0.0, 0.07, -0.04], [0.0, 0.11, -0.04], 0.008, 0.008, vmSteel, 8); vdTube(g, [0.0, 0.07, -0.14], [0.0, 0.11, -0.14], 0.008, 0.008, vmSteel, 8);
+  for (let k = 0; k < 6; k++) vdBand(g, [0, 0.11, -0.03 - k * 0.02], [0, 0, 1], 0.0125, 0.0012, vmDark);
   for (let k = 0; k < 4; k++) vdScrew(g, 0.0765, -0.02 + (k % 2) * 0.035, -0.06 - Math.floor(k / 2) * 0.1, 'x', 0.005, vmSteel, 1);
   for (let k = 0; k < 14; k++) vdB(g, 0.044, 0.008, 0.004, vmSteel, 0, 0.0, -0.27 - k * 0.04 + 0.0);        // chain links
   // gloved left hand clamped round the top handle
-  const lh = new THREE.Group(); g.add(lh);
-  for (let i = 0; i < 4; i++) { const z = -0.1 - i * 0.022 + 0.0; vmFinger(lh, [[0.05, 0.12, z], [0.026, 0.135, z], [-0.006, 0.133, z], [-0.026, 0.113, z], [-0.02, 0.091, z]], [0.0115, 0.011, 0.0102, 0.0094, 0.0084].map(v => v * (i === 3 ? 0.85 : 1)), vmGlove, vmPad); }
-  vdB(lh, 0.02, 0.05, 0.1, vmGlove, 0.055, 0.115, -0.08); vdS(lh, 0.026, vmGlove, 0.052, 0.098, -0.02, 0.9, 1.0, 1.1);
-  vmFinger(lh, [[0.05, 0.1, -0.03], [0.02, 0.1, -0.045], [-0.01, 0.092, -0.06], [-0.026, 0.092, -0.075]], [0.0145, 0.0128, 0.0115, 0.0102], vmGlove, vmPad);
-  vmArm(g, [0.06, 0.112, -0.02], [0.2, -0.22, 0.45], 0.085);
+  const lh = new THREE.Group(); lh.userData.hand = true; g.add(lh);
+  for (let i = 0; i < 4; i++) { const z = -0.1 - i * 0.022; vmFinger(lh, [[0.05, 0.14, z], [0.026, 0.155, z], [-0.006, 0.153, z], [-0.026, 0.133, z], [-0.021, 0.111, z]], [0.0115, 0.011, 0.0102, 0.0094, 0.0084].map(v => v * 0.88 * (i === 3 ? 0.85 : 1)), vmGlove, vmPad); }
+  vdB(lh, 0.02, 0.05, 0.1, vmGlove, 0.058, 0.145, -0.08); vdS(lh, 0.026, vmGlove, 0.056, 0.13, -0.02, 0.9, 1.0, 1.1);
+  vmFinger(lh, [[0.05, 0.13, -0.03], [0.02, 0.14, -0.045], [-0.01, 0.14, -0.06], [-0.03, 0.125, -0.075]], [0.0145, 0.0128, 0.0115, 0.0102].map(v => v * 0.88), vmGlove, vmPad);
+  vmArm(g, [0.065, 0.14, -0.02], [0.2, -0.22, 0.45], 0.085);
 }
 detailPistol(gunModels.pistol); detailShotgun(gunModels.shotgun); detailGrenade(gunModels.grenade); detailRifle(gunModels.rifle); detailSlime(gunModels.slime); detailRail(gunModels.rail); detailSaw(gunModels.saw);
 
