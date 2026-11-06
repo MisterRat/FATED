@@ -2633,16 +2633,14 @@ function vmTipPad(g, pts, radii, padMat, inward) { // leather fingertip pad: a f
   const r = radii[n], pd = vdS(g, r, padMat, t.x + c.x * r * 0.62 - d.x * r * 0.2, t.y + c.y * r * 0.62 - d.y * r * 0.2, t.z + c.z * r * 0.62 - d.z * r * 0.2, 0.9, 0.9, 0.4);
   pd.quaternion.setFromUnitVectors(vmZV, c);
 }
-function vmThumb(g, pts, radii, mat, padMat, inward) { // a human-shaped thumb: thick base into a thenar mound, bent first joint, wide flattened tip with a pad
+function vmThumb(g, pts, radii, mat, padMat, inward) { // a smooth, continuously tapered thumb: no ball joints or creases, so it reads as one finger and never as a broken one
   const n = pts.length - 1;
-  for (let i = 0; i < n; i++) vdTube(g, pts[i], pts[i + 1], radii[i], radii[i + 1], mat, 12);
-  for (let i = 0; i <= n; i++) vdS(g, radii[i] * (i === n - 1 ? 1.12 : 1.03), mat, pts[i][0], pts[i][1], pts[i][2]);               // the middle knuckle bulges
-  const a = new THREE.Vector3(...pts[0]), b = new THREE.Vector3(...pts[1]), dir = a.clone().sub(b).normalize();
-  vdS(g, radii[0] * 1.55, mat, a.x + dir.x * radii[0] * 0.55, a.y + dir.y * radii[0] * 0.55, a.z + dir.z * radii[0] * 0.55, 1, 0.9, 1.15);   // thenar mound where the thumb meets the palm
+  for (let i = 0; i < n; i++) vdTube(g, pts[i], pts[i + 1], radii[i], radii[i + 1], mat, 14);
+  for (let i = 1; i < n; i++) vdS(g, radii[i], mat, pts[i][0], pts[i][1], pts[i][2]);                                  // round off each bend so the segments blend
+  vdS(g, radii[0] * 1.15, mat, pts[0][0], pts[0][1], pts[0][2], 1, 0.95, 1.1);                                          // soft base into the palm
   const e = pts[n], pe = pts[n - 1], dd = new THREE.Vector3(e[0] - pe[0], e[1] - pe[1], e[2] - pe[2]).normalize();
-  const tip = vdS(g, radii[n] * 1.05, mat, e[0] + dd.x * radii[n] * 0.3, e[1] + dd.y * radii[n] * 0.3, e[2] + dd.z * radii[n] * 0.3, 1.1, 0.85, 1.2); tip.quaternion.setFromUnitVectors(vmZV, dd); // broad, slightly flat thumb tip
+  vdS(g, radii[n], mat, e[0], e[1], e[2]);                                                                              // rounded tip, same width as the shaft end
   if (padMat) vmTipPad(g, pts, radii, padMat, inward || [1, 0, 0]);
-  vdBand(g, pts[n - 1], [pts[n][0] - pts[n - 2][0], pts[n][1] - pts[n - 2][1], pts[n][2] - pts[n - 2][2]], radii[n - 1] * 1.08, 0.0013, vmDark);      // stitched joint crease
 }
 function vmArm(g0, a, b, w, watch) {
   const g = new THREE.Group(); g.userData.hand = true; g0.add(g); // sleeve with a stitched glove gauntlet at the wrist, a rolled cuff and an optional watch
