@@ -42,7 +42,7 @@ window.addEventListener('error', e => {
 // =====================================================================================
 // CONFIG - every number you are likely to tune lives here.
 // =====================================================================================
-const GAME_VERSION = '3.9'; // bump on every revision (shown on the main menu)
+const GAME_VERSION = '3.10'; // bump on every revision (shown on the main menu)
 const CFG = {
   player: {
     speed: 4, radius: 0.3, maxHp: 100,
@@ -2515,11 +2515,12 @@ let firing = false, fireCooldown = 0, recoil = 0;
 // Weapon view models (boxy, attached to camera)
 const gunGroup = new THREE.Group();
 const vmDark = new THREE.MeshLambertMaterial({ color: 0x2a2a30 });
-const vmMetal = new THREE.MeshLambertMaterial({ color: 0x555a63 });
+const vmMetal = new THREE.MeshPhongMaterial({ color: 0x555a63, shininess: 35, specular: 0x2a2a2a });
 const vmWood = new THREE.MeshLambertMaterial({ color: 0x6b4a2a });
+let vmWoodSet = null; // per-face wood materials (grain on the long faces, rings on the ends), filled in below
 const vmGreen = new THREE.MeshLambertMaterial({ color: 0x3d5238 });
 function vmBox(w, h, d, mat, x, y, z, rx = 0) {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat === vmWood && vmWoodSet ? vmWoodSet : mat);
   m.position.set(x, y, z);
   m.rotation.x = rx;
   return m;
@@ -2548,8 +2549,8 @@ function vmRearSight(g, x, y, z, baseY, o) {
   if (floorY - baseY > 0.0005) add(o.gap, floorY - baseY, d, vmMetal, x, (baseY + floorY) / 2, z); // notch floor
   add(o.gap + 2 * o.w + 0.006, 0.003, d + 0.006, vmDark, x, baseY + 0.0015, z);        // base plate
 }
-const vmBlue = new THREE.MeshLambertMaterial({ color: 0x20242a });
-const vmSteel = new THREE.MeshLambertMaterial({ color: 0x7a808a });
+const vmBlue = new THREE.MeshPhongMaterial({ color: 0x20242a, shininess: 55, specular: 0x333333 });
+const vmSteel = new THREE.MeshPhongMaterial({ color: 0x7a808a, shininess: 60, specular: 0x444444 });
 const vmGlove = new THREE.MeshLambertMaterial({ color: 0x2b241e });
 const vmSleeve = new THREE.MeshLambertMaterial({ color: 0x46563a });
 const vmOrange = new THREE.MeshBasicMaterial({ color: 0xff8822 });
@@ -2562,28 +2563,122 @@ function vmGuard(g, y, z, r) { // trigger guard ring + trigger
   vmRing(g, r, 0.006, vmDark, 0, y, z).rotation.y = Math.PI / 2;
   g.add(vmBox(0.01, r * 1.2, 0.01, vmMetal, 0, y + r * 0.4, z - 0.005));
 }
-// --- Hands: blocky gloved hands + sleeved forearms ---
-function vmArm(g, a, b, w) {
-  const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b);
-  const m = new THREE.Mesh(new THREE.BoxGeometry(w, w * 0.85, A.distanceTo(B)), vmSleeve);
-  m.position.copy(A).add(B).multiplyScalar(0.5);
-  m.lookAt(B);
-  g.add(m);
+// ---- procedural surface detail for the weapon view models: textures, helpers, hands ----
+function vmNoise(c, s, n, a, w) { for (let i = 0; i < n; i++) { const v = (Math.random() - 0.5) * a; c.fillStyle = v > 0 ? 'rgba(255,255,255,' + v + ')' : 'rgba(0,0,0,' + (-v) + ')'; c.fillRect(Math.random() * s, Math.random() * s, w, w); } }
+function vmStreaks(c, s, n, a, len) { for (let i = 0; i < n; i++) { const v = (Math.random() - 0.5) * a; c.fillStyle = v > 0 ? 'rgba(255,255,255,' + v + ')' : 'rgba(0,0,0,' + (-v) + ')'; c.fillRect(Math.random() * s, Math.random() * s, len * (0.3 + Math.random()), 1); } }
+function vmMap(size, base, fn, rep) { const t = makeTexture(size, (c, s) => { c.fillStyle = base; c.fillRect(0, 0, s, s); fn(c, s); }); if (rep) t.repeat.set(rep, rep); return t; }
+function vmApply(m, tex) { m.color.set(0xffffff); m.map = tex; m.needsUpdate = true; return m; }
+vmApply(vmMetal, vmMap(256, '#50555d', (c, s) => { vmStreaks(c, s, 700, 0.3, 90); vmNoise(c, s, 500, 0.12, 1); }));
+vmApply(vmSteel, vmMap(256, '#585e67', (c, s) => { vmStreaks(c, s, 800, 0.3, 80); vmNoise(c, s, 400, 0.2, 1); }));
+vmApply(vmBlue, vmMap(256, '#22262d', (c, s) => { vmStreaks(c, s, 500, 0.18, 70); vmNoise(c, s, 700, 0.14, 1); for (let i = 0; i < 70; i++) { c.fillStyle = 'rgba(150,154,162,0.35)'; c.fillRect(Math.random() * s, Math.random() * s, 1 + Math.random() * 2, 1); } }));
+vmApply(vmDark, vmMap(128, '#2c2c32', (c, s) => { vmNoise(c, s, 900, 0.13, 1); }));
+vmApply(vmGreen, vmMap(256, '#3f5539', (c, s) => { vmNoise(c, s, 1200, 0.14, 1); vmStreaks(c, s, 200, 0.12, 40); for (let i = 0; i < 40; i++) { c.fillStyle = 'rgba(190,200,160,0.25)'; c.fillRect(Math.random() * s, Math.random() * s, 2, 1); } }));
+// wood: grain runs along u on the long side faces; the top/bottom faces get a rotated copy and the ends show growth rings
+const vmWoodSide = vmMap(256, '#5a4029', (c, s) => {
+  for (let i = 0; i < 120; i++) { const y = Math.random() * s, ph = Math.random() * 6, am = 1 + Math.random() * 2.5; c.strokeStyle = Math.random() < 0.5 ? 'rgba(60,36,16,0.45)' : 'rgba(150,108,62,0.4)'; c.lineWidth = 0.6 + Math.random() * 1.6; c.beginPath(); for (let x = 0; x <= s; x += 16) { const yy = y + Math.sin(x / 38 + ph) * am; if (x === 0) c.moveTo(x, yy); else c.lineTo(x, yy); } c.stroke(); }
+  for (let i = 0; i < 260; i++) { c.fillStyle = 'rgba(40,24,10,0.5)'; c.fillRect(Math.random() * s, Math.random() * s, 3 + Math.random() * 6, 1); }
+});
+const vmWoodTopTex = vmWoodSide.clone(); vmWoodTopTex.center.set(0.5, 0.5); vmWoodTopTex.rotation = Math.PI / 2; vmWoodTopTex.needsUpdate = true;
+const vmWoodEndTex = vmMap(128, '#684a2a', (c, s) => { for (let r = 4; r < 110; r += 5) { c.strokeStyle = r % 10 < 5 ? 'rgba(70,42,18,0.55)' : 'rgba(150,110,64,0.45)'; c.lineWidth = 1.2; c.beginPath(); c.arc(s * 0.65, s * 0.35, r, 0, Math.PI * 2); c.stroke(); } });
+vmWood.color.set(0xd2c4b4); vmWood.map = vmWoodSide;
+const mkWood = (t) => new THREE.MeshLambertMaterial({ color: 0xd2c4b4, map: t });
+vmWoodSet = [mkWood(vmWoodSide), mkWood(vmWoodSide), mkWood(vmWoodTopTex), mkWood(vmWoodTopTex), mkWood(vmWoodEndTex), mkWood(vmWoodEndTex)];
+const vmChecker = new THREE.MeshLambertMaterial({ color: 0xffffff, map: vmMap(128, '#1d1b18', (c, s) => { c.strokeStyle = '#51463a'; c.lineWidth = 1.6; for (let k = -s; k < 2 * s; k += 10) { c.beginPath(); c.moveTo(k, 0); c.lineTo(k + s, s); c.stroke(); c.beginPath(); c.moveTo(k, s); c.lineTo(k + s, 0); c.stroke(); } }, 2) });
+const vmRubber = new THREE.MeshLambertMaterial({ color: 0xffffff, map: vmMap(128, '#151515', (c, s) => { vmNoise(c, s, 900, 0.25, 2); }) });
+const vmLeather = new THREE.MeshLambertMaterial({ color: 0xffffff, map: vmMap(128, '#5e4326', (c, s) => { vmNoise(c, s, 1100, 0.25, 2); vmStreaks(c, s, 150, 0.14, 30); }) });
+const vmHazard = new THREE.MeshLambertMaterial({ color: 0xffffff, map: vmMap(128, '#d9b21a', (c, s) => { c.fillStyle = '#16140f'; for (let k = -s; k < 2 * s; k += 32) { c.beginPath(); c.moveTo(k, s); c.lineTo(k + 16, s); c.lineTo(k + 16 + s, 0); c.lineTo(k + s, 0); c.fill(); } vmNoise(c, s, 300, 0.15, 1); }, 2) });
+const vmBrass = new THREE.MeshPhongMaterial({ color: 0xc9a24a, shininess: 60, specular: 0x665533 });
+const vmCopper = new THREE.MeshPhongMaterial({ color: 0xb9683a, shininess: 50, specular: 0x553322 });
+const vmGold = new THREE.MeshPhongMaterial({ color: 0xe0b840, shininess: 80, specular: 0x886622 });
+const vmHull = new THREE.MeshLambertMaterial({ color: 0xb02820 });
+const vmGlassBlue = new THREE.MeshBasicMaterial({ color: 0x66aadd, transparent: true, opacity: 0.25, depthWrite: false });
+const vmLedG = new THREE.MeshBasicMaterial({ color: 0x66ff66 }), vmLedR = new THREE.MeshBasicMaterial({ color: 0xff3322 }), vmLedC = new THREE.MeshBasicMaterial({ color: 0x44ddff }), vmLedDim = new THREE.MeshBasicMaterial({ color: 0x14404a });
+// gloves + sleeves
+const vmPad = new THREE.MeshLambertMaterial({ color: 0xffffff, map: vmMap(128, '#4a3a28', (c, s) => { vmNoise(c, s, 800, 0.28, 2); vmStreaks(c, s, 120, 0.12, 24); }) });
+vmApply(vmGlove, vmMap(128, '#2f2820', (c, s) => { c.strokeStyle = 'rgba(0,0,0,0.28)'; c.lineWidth = 1; for (let k = 0; k < s; k += 3) { c.beginPath(); c.moveTo(0, k); c.lineTo(s, k); c.stroke(); c.beginPath(); c.moveTo(k, 0); c.lineTo(k, s); c.stroke(); } vmNoise(c, s, 500, 0.2, 1); }, 2));
+vmApply(vmSleeve, vmMap(256, '#3c4b33', (c, s) => { const cols = ['rgba(56,72,44,0.55)', 'rgba(88,106,66,0.5)', 'rgba(34,46,28,0.5)']; for (let i = 0; i < 26; i++) { c.fillStyle = cols[i % 3]; c.beginPath(); c.ellipse ? c.ellipse(Math.random() * s, Math.random() * s, 10 + Math.random() * 26, 6 + Math.random() * 14, Math.random() * 3, 0, Math.PI * 2) : c.arc(Math.random() * s, Math.random() * s, 14, 0, Math.PI * 2); c.fill(); } c.strokeStyle = 'rgba(0,0,0,0.16)'; c.lineWidth = 1; for (let k = 0; k < s; k += 3) { c.beginPath(); c.moveTo(0, k); c.lineTo(s, k); c.stroke(); c.beginPath(); c.moveTo(k, 0); c.lineTo(k, s); c.stroke(); } }, 2));
+// small construction helpers (all add to a group)
+const vmUpV = new THREE.Vector3(0, 1, 0), vmZV = new THREE.Vector3(0, 0, 1);
+function vdB(g, w, h, d, mat, x, y, z, rx = 0, ry = 0, rz = 0) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.rotation.set(rx, ry, rz); g.add(m); return m; }
+function vdC(g, r, len, mat, x, y, z, axis = 'z', seg = 16, r2) { const m = new THREE.Mesh(new THREE.CylinderGeometry(r2 === undefined ? r : r2, r, len, seg), mat); if (axis === 'z') m.rotation.x = Math.PI / 2; else if (axis === 'x') m.rotation.z = Math.PI / 2; m.position.set(x, y, z); g.add(m); return m; }
+function vdS(g, r, mat, x, y, z, sx = 1, sy = 1, sz = 1) { const m = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 9), mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); g.add(m); return m; }
+function vdT(g, R, t, mat, x, y, z, axis = 'z', seg = 20) { const m = new THREE.Mesh(new THREE.TorusGeometry(R, t, 8, seg), mat); if (axis === 'x') m.rotation.y = Math.PI / 2; else if (axis === 'y') m.rotation.x = Math.PI / 2; m.position.set(x, y, z); g.add(m); return m; }
+function vdScrew(g, x, y, z, axis, r = 0.0045, mat = vmSteel, out = 1) { vdC(g, r, 0.003, mat, x, y, z, axis, 10); if (axis === 'x') vdB(g, 0.0035, r * 1.7, 0.0012, vmDark, x + out * 0.0008, y, z); else if (axis === 'z') vdB(g, r * 1.7, 0.0012, 0.0035, vmDark, x, y, z + out * 0.0008); else vdB(g, r * 1.7, 0.0035, 0.0012, vmDark, x, y + out * 0.0008, z); }
+function vdTube(g, a, b, r0, r1, mat, seg = 10) { const A = new THREE.Vector3(a[0], a[1], a[2]), B = new THREE.Vector3(b[0], b[1], b[2]); const m = new THREE.Mesh(new THREE.CylinderGeometry(r1, r0, A.distanceTo(B), seg), mat); m.position.copy(A).add(B).multiplyScalar(0.5); m.quaternion.setFromUnitVectors(vmUpV, B.clone().sub(A).normalize()); g.add(m); return m; }
+function vdBand(g, p, dir, R, t, mat) { const m = new THREE.Mesh(new THREE.TorusGeometry(R, t, 8, 18), mat); m.position.set(p[0], p[1], p[2]); m.quaternion.setFromUnitVectors(vmZV, new THREE.Vector3(dir[0], dir[1], dir[2]).normalize()); g.add(m); return m; }
+function vdDecal(g, text, w, h, x, y, z, side, fontPx, col) { // engraved lettering on a flat side (side -1 = left face, +1 = right face)
+  const cw = Math.max(128, Math.min(1024, Math.round(64 * w / h))), cv = document.createElement('canvas'); cv.width = cw; cv.height = 64; const c = cv.getContext('2d');
+  c.clearRect(0, 0, cw, 64); c.fillStyle = col || 'rgba(205,205,195,0.55)'; let fs = 40; c.font = 'bold ' + fs + 'px monospace'; c.textAlign = 'center'; c.textBaseline = 'middle';
+  try { const mw = c.measureText(text).width; if (mw > cw * 0.92) { fs = Math.floor(fs * cw * 0.92 / mw); c.font = 'bold ' + fs + 'px monospace'; } } catch (e) { }
+  c.fillText(text, cw / 2, 34);
+  const tex = new THREE.CanvasTexture(cv); tex.anisotropy = 8;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })); m.position.set(x + side * 0.0007, y, z); m.rotation.y = side < 0 ? -Math.PI / 2 : Math.PI / 2; g.add(m); return m; }
+
+// --- Hands: tactical gloves with segmented fingers, hard knuckle plates, stitched cuffs and tapered camo sleeves ---
+function vmFinger(g, pts, radii, mat, padMat) { // a jointed finger: tapered segments, round knuckles, leather tip pad
+  for (let i = 0; i < pts.length - 1; i++) vdTube(g, pts[i], pts[i + 1], radii[i], radii[i + 1], mat, 10);
+  for (let i = 0; i < pts.length; i++) vdS(g, radii[i] * 1.03, mat, pts[i][0], pts[i][1], pts[i][2]);
+  const n = pts.length - 1, t = pts[n], p = pts[n - 1], d = new THREE.Vector3(t[0] - p[0], t[1] - p[1], t[2] - p[2]).normalize();
+  if (padMat) { const pd = vdS(g, radii[n] * 0.95, padMat, t[0] + d.x * radii[n] * 0.35, t[1] + d.y * radii[n] * 0.35, t[2] + d.z * radii[n] * 0.35, 1, 1, 0.8); pd.quaternion.setFromUnitVectors(vmZV, d); }
+  for (let i = 1; i < pts.length - 1; i++) { // flex creases at the joints
+    const a = pts[i - 1], b = pts[i + 1]; vdBand(g, pts[i], [b[0] - a[0], b[1] - a[1], b[2] - a[2]], radii[i] * 1.0, 0.0012, vmDark);
+  }
 }
-function vmGripHand(g, x, y, z, rx) { // right hand wrapped round a grip centred at (x,y,z)
-  const h = new THREE.Group();
-  h.add(vmBox(0.05, 0.1, 0.06, vmGlove, 0.05, 0, 0.02));                                   // palm / back of hand
-  for (let i = 0; i < 4; i++) h.add(vmBox(0.1, 0.022, 0.035, vmGlove, 0, 0.036 - i * 0.025, -0.05)); // fingers
-  h.add(vmBox(0.018, 0.018, 0.07, vmGlove, -0.045, 0.045, -0.01));                          // thumb
+function vmArm(g, a, b, w, watch) { // sleeve with a stitched glove gauntlet at the wrist, a rolled cuff and an optional watch
+  const A = new THREE.Vector3(a[0], a[1], a[2]), B = new THREE.Vector3(b[0], b[1], b[2]), d = B.clone().sub(A).normalize(), r = w * 0.46, at = (t) => A.clone().addScaledVector(d, t).toArray();
+  vdTube(g, at(0.02), b, r * 0.78, r * 1.18, vmSleeve, 16);                          // forearm, widening to the elbow
+  vdTube(g, a, at(0.07), r * 0.80, r * 0.88, vmGlove, 16);                            // gauntlet
+  vdBand(g, at(0.075), d.toArray(), r * 0.9, 0.0035, vmDark);                         // gauntlet hem stitching
+  vdBand(g, at(0.045), d.toArray(), r * 0.88, 0.006, vmRubber);                       // velcro wrist strap
+  const up = new THREE.Vector3(0, 1, 0), n = up.clone().addScaledVector(d, -up.dot(d)).normalize();
+  const bk = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.006, 0.014), vmSteel); bk.position.fromArray(at(0.045)).addScaledVector(n, r * 0.9 + 0.003); bk.quaternion.setFromUnitVectors(vmUpV, n); g.add(bk); // strap buckle
+  vdBand(g, at(0.12), d.toArray(), r * 0.97, 0.01, vmSleeve);                         // rolled sleeve cuff
+  vdBand(g, at(0.115), d.toArray(), r * 0.985, 0.0012, vmDark); vdBand(g, at(0.128), d.toArray(), r * 0.985, 0.0012, vmDark);
+  for (let i = 0; i < 3; i++) vdBand(g, at(0.2 + i * 0.12), d.toArray(), r * (0.99 + i * 0.05), 0.0014, vmDark); // sleeve seams
+  if (watch) { // wrist watch with a lit digital face
+    const wp = new THREE.Vector3().fromArray(at(0.095));
+    vdBand(g, wp.toArray(), d.toArray(), r * 0.93, 0.004, vmRubber);
+    const face = new THREE.Mesh(new THREE.CylinderGeometry(0.0185, 0.0185, 0.007, 20), vmDark); face.position.copy(wp).addScaledVector(n, r * 0.93 + 0.004); face.quaternion.setFromUnitVectors(vmUpV, n); g.add(face);
+    const cv = document.createElement('canvas'); cv.width = cv.height = 64; const c = cv.getContext('2d'); c.fillStyle = '#04120a'; c.fillRect(0, 0, 64, 64); c.fillStyle = '#7dff9a'; c.font = 'bold 20px monospace'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('06:12', 32, 28); c.fillRect(14, 42, 36, 2);
+    const dial = new THREE.Mesh(new THREE.CircleGeometry(0.0155, 20), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv) })); dial.position.copy(face.position).addScaledVector(n, 0.0038); dial.quaternion.setFromUnitVectors(vmZV, n); dial.rotation.z += 0; g.add(dial);
+  }
+}
+function vmGripHand(g, x, y, z, rx, o = {}) { // right hand wrapped round a grip centred at (x,y,z); o.trigger = world point for the index fingertip
+  const h = new THREE.Group(), gw = o.w || 0.056, gd = o.d || 0.085, hw = gw / 2, hd = gd / 2;
+  const rows = [0.036, 0.011, -0.014, -0.039], sc = [1, 1.08, 1, 0.82], rad = [0.0124, 0.0116, 0.0107, 0.01, 0.0088];
+  // back of the hand and palm
+  vdB(h, 0.016, 0.1, 0.082, vmGlove, hw + 0.026, 0.0, 0.02);                                // back of hand
+  vdB(h, 0.024, 0.092, 0.07, vmPad, hw + 0.008, 0.0, 0.016);                                 // padded palm
+  vdS(h, 0.03, vmGlove, hw + 0.02, -0.04, 0.05, 0.8, 1.15, 1.0);                             // heel of the hand
+  vdS(h, 0.027, vmGlove, hw + 0.016, 0.03, 0.05, 0.85, 1.1, 1.0);                            // thumb muscle
+  for (let i = 0; i < 4; i++) { vdS(h, 0.0105, vmRubber, hw + 0.037, rows[i], -0.012, 0.6, 1.0, 1.0); vdB(h, 0.006, 0.02, 0.012, vmDark, hw + 0.04, rows[i], -0.012); } // hard knuckle plates
+  vdB(h, 0.004, 0.09, 0.0015, vmDark, hw + 0.0345, 0, 0.062);                                // stitched seam at the wrist
+  // fingers
+  const T = o.trigger ? new THREE.Vector3(o.trigger[0] - x, o.trigger[1] - y, o.trigger[2] - z).applyAxisAngle(new THREE.Vector3(1, 0, 0), -rx) : null;
+  for (let i = 0; i < 4; i++) {
+    const y0 = rows[i], s = sc[i], r = rad.map(v => v * (0.94 + 0.06 * s));
+    let pts;
+    if (i === 0 && T) pts = [[hw + 0.024, y0, -0.012], [hw + 0.014, (y0 + T.y) / 2 + 0.004, T.z + 0.07], [hw - 0.002, T.y + 0.003, T.z + 0.04], [0.012, T.y + 0.001, T.z + 0.016], [-0.004, T.y, T.z + 0.004]];
+    else pts = [[hw + 0.024, y0, -0.012], [hw + 0.004, y0, -hd - 0.009], [0.0, y0, -hd - 0.0145], [-hw - 0.011, y0, -hd + 0.01 * s], [-hw - 0.015, y0 + 0.001, -hd + 0.036 * s]];
+    vmFinger(h, pts, r, vmGlove, vmPad);
+  }
+  // thumb along the left side
+  vmFinger(h, [[hw + 0.024, 0.014, 0.045], [hw + 0.002, 0.03, hd + 0.012], [-hw - 0.004, 0.038, hd - 0.004], [-hw - 0.014, 0.043, hd - 0.04], [-hw - 0.016, 0.046, hd - 0.062]], [0.0155, 0.0138, 0.0128, 0.0116, 0.0104], vmGlove, vmPad);
+  vdS(h, 0.0075, vmRubber, -hw - 0.012, 0.0545, hd - 0.04, 1, 0.5, 1.3);                     // thumb guard
   h.position.set(x, y, z); h.rotation.x = rx; g.add(h);
   vmArm(g, [x + 0.07, y - 0.03, z + 0.05], [x + 0.2, y - 0.32, z + 0.55], 0.085);
 }
-function vmCupHand(g, x, y, z) { // left hand cupping a forend/handguard/foregrip from below
-  const h = new THREE.Group();
-  h.add(vmBox(0.1, 0.025, 0.09, vmGlove, 0, -0.04, 0));
-  h.add(vmBox(0.022, 0.08, 0.09, vmGlove, -0.055, 0, 0));
-  h.add(vmBox(0.022, 0.07, 0.04, vmGlove, 0.055, 0, -0.02));
-  vmArm(h, [-0.03, -0.04, 0.05], [-0.2, -0.34, 0.55], 0.085);
+function vmCupHand(g, x, y, z, o = {}) { // left hand cupping a forend/handguard/foregrip from below; fingers wrap up the right side, thumb along the left
+  const h = new THREE.Group(), hw = o.w || 0.029, u = o.drop || 0.03, rad = [0.0125, 0.0118, 0.011, 0.0102, 0.009], sc = [1, 1.08, 1, 0.82];
+  vdB(h, hw * 2 + 0.03, 0.014, 0.08, vmPad, -0.004, -u - 0.01, 0.0);                          // padded palm
+  vdS(h, 0.03, vmGlove, -hw - 0.03, -u - 0.008, 0.032, 1.0, 0.9, 0.9);                        // heel
+  vdB(h, 0.012, 0.03, 0.088, vmGlove, -hw - 0.034, -u + 0.002, 0.0);                          // back of hand (faces the camera)
+  vdB(h, 0.0025, 0.026, 0.084, vmDark, -hw - 0.0405, -u + 0.002, 0.0);
+  for (let i = 0; i < 4; i++) { const z0 = -0.036 + i * 0.024, s = sc[i], r = rad.map(v => v * (0.94 + 0.06 * s));
+    vmFinger(h, [[-hw - 0.024, -u - 0.004, z0], [-hw * 0.25, -u - 0.0115, z0], [hw + 0.004, -u - 0.0085, z0], [hw + 0.0115, -u + 0.018, z0], [hw + 0.01, -u + 0.04 * s, z0 + 0.002]], r, vmGlove, vmPad);
+    vdS(h, 0.0105, vmRubber, -hw - 0.04, -u + 0.004, z0, 0.6, 1.0, 1.0); }                    // knuckle plates
+  vmFinger(h, [[-hw - 0.024, -u + 0.004, -0.044], [-hw - 0.016, -u + 0.026, -0.06], [-hw - 0.013, -u + 0.036, -0.086], [-hw - 0.012, -u + 0.04, -0.108]], [0.0155, 0.0138, 0.0124, 0.0108], vmGlove, vmPad);
+  vmArm(h, [-hw - 0.03, -u - 0.01, 0.05], [-0.2, -0.34, 0.55], 0.085, true);
   h.position.set(x, y, z); g.add(h);
   return h;
 }
@@ -2609,8 +2704,8 @@ function makePistolModel() {
   mag.add(vmBox(0.045, 0.14, 0.065, vmSteel, 0, -0.1, 0.065, -0.28));             // magazine (hidden in grip)
   mag.add(vmBox(0.062, 0.016, 0.095, vmDark, 0, -0.176, 0.088, -0.28));           // magazine base
   g.add(sl, mag);
-  vmGripHand(g, 0, -0.095, 0.065, -0.28);
-  const lh = vmCupHand(g, 0, -0.17, 0.07);
+  vmGripHand(g, 0, -0.095, 0.065, -0.28, { trigger: [0, -0.0356, -0.034] });
+  const lh = vmCupHand(g, 0, -0.154, 0.07, { w: 0.031 });
   g.userData = { type: 'pistol', slide: sl, mag, lh };
   return g;
 }
@@ -2633,8 +2728,8 @@ function makeShotgunModel() {
   const bead = new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 8), vmDot);
   bead.position.set(0, 0.077, -0.35); g.add(bead);                                // front bead (top = sight line)
   vmRearSight(g, 0, 0.085, 0.1, 0.0725, { w: 0.007, gap: 0.022, up: 0.012, down: 0.008 });                                             // rear notch
-  vmGripHand(g, 0, -0.08, 0.205, -0.35);
-  const lh = vmCupHand(pump, 0, -0.005, -0.15);
+  vmGripHand(g, 0, -0.08, 0.205, -0.35, { trigger: [0, -0.0288, 0.076], w: 0.05, d: 0.07 });
+  const lh = vmCupHand(pump, 0, 0.001, -0.15, { w: 0.029 });
   g.userData = { type: 'shotgun', pump, lh };
   return g;
 }
@@ -2664,8 +2759,8 @@ function makeGrenadeModel() {
   g.add(vmBox(0.014, 0.045, 0.014, vmDark, 0, 0.0625, -0.32));
   g.add(vmBox(0.006, 0.006, 0.001, vmOrange, 0, 0.0785, -0.3127));               // front dot                    // front post (top = sight line)
   vmRearSight(g, 0, 0.085, 0.14, 0.0775, { w: 0.011, gap: 0.022, up: 0.016, down: 0.005, dot: vmOrange });                                            // rear notch
-  vmGripHand(g, 0, -0.11, 0.2, -0.3);
-  const lh = vmCupHand(g, 0, -0.15, -0.13);
+  vmGripHand(g, 0, -0.11, 0.2, -0.3, { trigger: [0, -0.0488, 0.126], w: 0.05, d: 0.07 });
+  const lh = vmCupHand(g, 0, -0.14, -0.13, { w: 0.021 });
   g.userData = { type: 'grenade', drum, lh };
   return g;
 }
@@ -2693,8 +2788,8 @@ function makeRifleModel() {
   mag.add(vmBox(0.036, 0.07, 0.065, vmSteel, 0, -0.135, -0.052, 0.15));
   mag.add(vmBox(0.036, 0.07, 0.065, vmSteel, 0, -0.2, -0.075, 0.3));
   g.add(bolt, mag);
-  vmGripHand(g, 0, -0.005, 0.2, -0.15);
-  const lh = vmCupHand(g, 0, 0, -0.17);
+  vmGripHand(g, 0, -0.005, 0.2, -0.15, { trigger: [0, -0.0516, 0.026], w: 0.05, d: 0.07 });
+  const lh = vmCupHand(g, 0, 0.03, -0.17, { w: 0.026 });
   g.userData = { type: 'rifle', slide: bolt, mag, lh };
   return g;
 }
@@ -2714,8 +2809,8 @@ function makeSlimeModel() {
   g.add(vmBox(0.04, 0.06, 0.2, vmDark, 0, -0.01, 0.2));                           // stock
   g.add(vmBox(0.035, 0.1, 0.04, vmDark, 0, -0.075, 0.06));                        // grip
   g.add(vmBox(0.012, 0.012, 0.012, new THREE.MeshBasicMaterial({ color: 0xaaff66 }), 0, 0.055, -0.1)); // sight dot
-  vmGripHand(g, 0, -0.08, 0.06, -0.2);
-  const lh = vmCupHand(g, 0, -0.03, -0.2);
+  vmGripHand(g, 0, -0.08, 0.06, -0.2, { trigger: [0, -0.0362, 0.041], w: 0.036, d: 0.04 });
+  const lh = vmCupHand(g, 0, 0.018, -0.2, { w: 0.033 });
   g.userData = { type: 'slime', lh, fills };
   return g;
 }
@@ -2730,8 +2825,8 @@ function makeRailModel() {
   g.add(vmBox(0.05, 0.07, 0.22, vmMetal, 0, -0.01, 0.28));                        // stock
   g.add(vmBox(0.035, 0.1, 0.04, vmDark, 0, -0.07, 0.1));                          // grip
   g.add(vmBox(0.012, 0.012, 0.012, cyan, 0, 0.075, -0.05));                       // sight dot
-  vmGripHand(g, 0, -0.075, 0.1, -0.2);
-  const lh = vmCupHand(g, 0, -0.04, -0.22);
+  vmGripHand(g, 0, -0.075, 0.1, -0.2, { trigger: [0, -0.035, 0.071], w: 0.036, d: 0.04 });
+  const lh = vmCupHand(g, 0, 0.031, -0.22, { w: 0.034 });
   g.userData = { type: 'rail', lh };
   return g;
 }
@@ -2739,8 +2834,7 @@ function makeSawModel() { // chainsaw bolted to the forearm
   const g = new THREE.Group();
   const orange = new THREE.MeshLambertMaterial({ color: 0xcc5511 }), bar = new THREE.MeshLambertMaterial({ color: 0x777c85 }), tooth = new THREE.MeshLambertMaterial({ color: 0xc8ccd4 });
   const top = new THREE.Group(), bot = new THREE.Group();
-  g.add(vmBox(0.11, 0.11, 0.42, vmGreen, 0.02, -0.07, 0.12));              // forearm sleeve
-  g.add(vmBox(0.085, 0.085, 0.1, vmGlove, 0.02, -0.04, -0.12));            // gauntlet
+  vmArm(g, [0.02, -0.04, -0.14], [0.1, -0.17, 0.5], 0.13);                  // forearm in a camo sleeve with a glove gauntlet at the wrist
   g.add(vmBox(0.15, 0.14, 0.24, orange, 0, 0.0, -0.12));                   // motor housing
   g.add(vmBox(0.05, 0.06, 0.05, vmDark, 0.0, 0.1, -0.08));                 // pull cap
   g.add(vmBox(0.04, 0.1, 0.52, bar, 0, 0.0, -0.5));                        // guide bar
@@ -2760,6 +2854,175 @@ const gunModels = {
   saw: makeSawModel()
 };
 for (const k in gunModels) { const u = gunModels[k].userData; u.lhBase = u.lh.position.clone(); }
+// ======== detail pass: extra parts, textures and markings for every weapon (the original shapes and sight lines are untouched) ========
+function detailPistol(g) {
+  const u = g.userData, sl = u.slide, mag = u.mag;
+  for (let i = 0; i < 5; i++) { vdB(sl, 0.064, 0.05, 0.004, vmDark, 0, 0.046, -0.2 - i * 0.011); }          // front serrations
+  vdB(sl, 0.002, 0.026, 0.07, vmVoid, 0.0315, 0.058, -0.06);                                              // ejection port opening (right)
+  vdC(sl, 0.0055, 0.034, vmBrass, 0.026, 0.055, -0.06, 'z', 12);                                         // chambered round showing in the port
+  vdB(sl, 0.004, 0.012, 0.03, vmSteel, 0.0325, 0.062, -0.012);                                             // extractor
+  vdB(sl, 0.056, 0.007, 0.012, vmDark, 0, 0.02, 0.046);                                                   // rear slide channel
+  vdDecal(sl, 'MODEL 1911 .45 AUTO', 0.15, 0.017, -0.0315, 0.046, -0.105, -1, 26);
+  vdDecal(sl, 'F A T E D   A R M Y', 0.12, 0.014, 0.0315, 0.046, -0.12, 1, 24);
+  vdC(g, 0.0158, 0.04, vmSteel, 0, 0.045, -0.245, 'z', 16);                                               // barrel bushing
+  vdC(g, 0.0085, 0.012, vmDark, 0, 0.045, -0.262, 'z', 12);                                               // recoil spring plug
+  vdB(g, 0.006, 0.014, 0.05, vmSteel, -0.0305, 0.026, -0.03);                                              // slide stop lever
+  vdB(g, 0.007, 0.014, 0.022, vmDark, -0.0335, 0.028, 0.026);                                              // thumb safety paddle
+  vdC(g, 0.0085, 0.006, vmSteel, -0.0295, -0.048, 0.03, 'x', 12);                                         // magazine release
+  vdT(g, 0.0075, 0.0022, vmBlue, 0, 0.07, 0.072, 'x', 14);                                                  // ring hammer
+  vdB(g, 0.012, 0.012, 0.012, vmBlue, 0, 0.056, 0.058);
+  vdScrew(g, -0.0285, 0.0, -0.075, 'x', 0.004, vmSteel, -1);                                              // frame screws
+  const gp = new THREE.Group(); gp.position.set(0, -0.095, 0.065); gp.rotation.x = -0.28; g.add(gp);       // grip details in grip space
+  for (const s of [-1, 1]) {
+    vdB(gp, 0.0012, 0.122, 0.064, vmChecker, s * 0.0343, 0, 0.0);                                         // checkered walnut panels
+    vdC(gp, 0.0065, 0.0016, vmGold, s * 0.0355, 0.045, -0.012, 'x', 18);                                  // medallion
+    vdScrew(gp, s * 0.0352, 0.05, 0.022, 'x', 0.0045, vmSteel, s); vdScrew(gp, s * 0.0352, -0.04, 0.022, 'x', 0.0045, vmSteel, s);
+    vdScrew(gp, s * 0.0352, 0.05, -0.028, 'x', 0.0045, vmSteel, s); vdScrew(gp, s * 0.0352, -0.04, -0.028, 'x', 0.0045, vmSteel, s);
+  }
+  vdB(gp, 0.05, 0.118, 0.003, vmChecker, 0, 0, -0.0432);                                                   // checkered front strap
+  vdB(gp, 0.05, 0.118, 0.003, vmChecker, 0, 0, 0.0432);                                                    // arched mainspring housing
+  vdT(gp, 0.007, 0.0018, vmSteel, 0, -0.075, 0.044, 'x', 12);                                              // lanyard loop
+  vdB(mag, 0.062, 0.005, 0.095, vmRubber, 0, -0.1895, 0.088, -0.28);                                       // rubber base pad
+  vdB(mag, 0.0012, 0.1, 0.012, vmVoid, -0.0227, -0.1, 0.0, -0.28);                                         // follower slots
+  for (let i = 0; i < 6; i++) vdB(mag, 0.0014, 0.0035, 0.012, vmDot, -0.0229, -0.063 - i * 0.015, 0.03 + i * 0.004, -0.28); // round-count holes
+}
+function detailShotgun(g) {
+  const u = g.userData, pump = u.pump;
+  vdB(pump, 0.0012, 0.04, 0.1, vmChecker, 0.0293, 0, -0.15); vdB(pump, 0.0012, 0.04, 0.1, vmChecker, -0.0293, 0, -0.15);     // checkered pump handle
+  vdB(pump, 0.05, 0.0012, 0.1, vmChecker, 0, -0.0293, -0.15);
+  vdC(pump, 0.0045, 0.14, vmSteel, 0.026, 0.01, -0.02, 'z', 10); vdC(pump, 0.0045, 0.14, vmSteel, -0.026, 0.01, -0.02, 'z', 10); // action bars
+  vdC(pump, 0.032, 0.01, vmDark, 0, 0, -0.07, 'z', 18);                                                    // pump front collar
+  vdC(pump, 0.032, 0.01, vmDark, 0, 0, -0.232, 'z', 18);
+  vdScrew(g, -0.0335, 0.045, 0.14, 'x', 0.0045, vmSteel, -1); vdScrew(g, -0.0335, 0.0, 0.14, 'x', 0.0045, vmSteel, -1); vdScrew(g, -0.0335, 0.045, 0.03, 'x', 0.0045, vmSteel, -1);
+  vdB(g, 0.002, 0.03, 0.07, vmSteel, 0.0333, 0.02, 0.07);                                                  // loading gate / carrier plate
+  vdB(g, 0.002, 0.016, 0.05, vmVoid, 0.0333, 0.055, 0.04);                                                 // ejection slot
+  vdDecal(g, 'MODEL 97  12 GA', 0.11, 0.02, -0.0335, 0.032, 0.095, -1, 26);
+  vdB(g, 0.07, 0.09, 0.004, vmDark, 0, 0.03, -0.032);                                                      // takedown seam at the receiver face
+  vdC(g, 0.017, 0.012, vmSteel, 0, 0.005, -0.1, 'z', 14); vdC(g, 0.017, 0.012, vmSteel, 0, 0.005, -0.25, 'z', 14); // tube clamps
+  vdB(g, 0.008, 0.008, 0.014, vmSteel, 0, 0.0765, 0.178);                                                   // hammer spur ridges
+  for (let i = 0; i < 4; i++) vdB(g, 0.013, 0.0015, 0.002, vmDark, 0, 0.075 + i * 0.001, 0.195 + i * 0.0035);
+  const gp = new THREE.Group(); gp.position.set(0, -0.08, 0.205); gp.rotation.x = -0.35; g.add(gp);
+  vdB(gp, 0.0012, 0.1, 0.052, vmChecker, 0.0256, 0, 0); vdB(gp, 0.0012, 0.1, 0.052, vmChecker, -0.0256, 0, 0);
+  vdB(gp, 0.05, 0.1, 0.0016, vmLeather, 0, 0, 0.0345);                                                     // leather back strap
+  // side saddle: three shells in a leather holder on the left of the receiver
+  vdB(g, 0.004, 0.075, 0.13, vmLeather, -0.0365, 0.012, 0.125);
+  for (let i = 0; i < 3; i++) { const sy = 0.038 - i * 0.026; vdC(g, 0.0095, 0.052, vmHull, -0.046, sy, 0.128, 'z', 14); vdC(g, 0.0098, 0.014, vmBrass, -0.046, sy, 0.152, 'z', 14); vdC(g, 0.0085, 0.003, vmBrass, -0.046, sy, 0.1, 'z', 12); }
+  vdC(g, 0.0035, 0.01, vmSteel, -0.0395, 0.012, 0.185, 'x', 8);                                            // holder rivet
+  vdT(g, 0.01, 0.002, vmSteel, 0, -0.152, 0.236, 'x', 12);                                                 // sling swivel
+}
+function detailGrenade(g) {
+  const u = g.userData, drum = u.drum;
+  for (let i = 0; i < 6; i++) vdC(g, 0.0535, 0.006, vmDark, 0, 0, -0.1 - i * 0.032, 'z', 20);              // cooling fins
+  vdC(g, 0.0475, 0.034, vmHazard, 0, 0, -0.318, 'z', 22);                                                   // hazard band
+  for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4 + 0.39; for (let j = 0; j < 3; j++) vdB(g, 0.012, 0.004, 0.022, vmVoid, Math.cos(a) * 0.0455, Math.sin(a) * 0.0455, -0.2 - j * 0.032, 0, 0, a + Math.PI / 2); } // vent slots
+  vdT(g, 0.034, 0.004, vmSteel, 0, 0, -0.367, 'z', 20);
+  for (let k = 0; k < 12; k++) { const a = k * Math.PI / 6; vdB(drum, 0.007, 0.005, 0.12, vmSteel, Math.cos(a) * 0.0605, Math.sin(a) * 0.0605, 0, 0, 0, a + Math.PI / 2); } // drum grip ribs
+  for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2 + Math.PI / 4; vdC(drum, 0.02, 0.012, vmBrass, Math.cos(a) * 0.052, Math.sin(a) * 0.052, -0.069, 'z', 14); vdS(drum, 0.0165, vmGreen, Math.cos(a) * 0.052, Math.sin(a) * 0.052, -0.076, 1, 1, 0.7); } // grenades loaded in the drum
+  vdC(drum, 0.01, 0.14, vmSteel, 0, 0, 0, 'z', 12);                                                         // centre pin
+  vdB(g, 0.0012, 0.035, 0.12, vmHazard, -0.0358, -0.03, 0.17);                                              // hazard stripe plate
+  vdDecal(g, 'HE-4  LAUNCHER', 0.1, 0.02, -0.0358, 0.03, 0.17, -1, 28);
+  for (let i = 0; i < 4; i++) vdB(g, 0.009, 0.004, 0.012, i < 3 ? vmOrange : vmLedDim, -0.01 + (i % 2) * 0.02, 0.0432, 0.2 + Math.floor(i / 2) * 0.016); // ammo lamps
+  for (let i = 0; i < 9; i++) vdB(g, 0.024, 0.0016, 0.003, vmDark, 0, 0.0776, 0.075 + i * 0.012);          // rail slots
+  vdB(g, 0.012, 0.012, 0.055, vmSteel, 0.045, 0.02, 0.115); vdC(g, 0.009, 0.014, vmDark, 0.05, 0.02, 0.1, 'x', 12); // charging handle
+  for (let i = 0; i < 5; i++) vdB(g, 0.0405, 0.006, 0.052, vmRubber, 0, -0.07 - i * 0.017, -0.13);          // ribbed foregrip
+  for (let i = 0; i < 4; i++) vdScrew(g, -0.036, 0.025 - i * 0.017, 0.255, 'x', 0.004, vmSteel, -1);
+  vdB(g, 0.052, 0.1, 0.004, vmRubber, 0, -0.04, 0.4125);                                                    // rubber butt pad
+  for (let i = 0; i < 6; i++) vdB(g, 0.052, 0.002, 0.006, vmDark, 0, -0.08 + i * 0.0168, 0.416);
+  vdB(g, 0.062, 0.016, 0.1, vmGreen, 0, 0.026, 0.31);                                                       // cheek riser
+  vdB(g, 0.0012, 0.12, 0.05, vmRubber, 0.0252, -0.11, 0.2, -0.3); vdB(g, 0.0012, 0.12, 0.05, vmRubber, -0.0252, -0.11, 0.2, -0.3); // grip panels
+}
+function detailRifle(g) {
+  const u = g.userData, bolt = u.slide, mag = u.mag;
+  vdC(g, 0.0125, 0.034, vmSteel, 0, 0.037, -0.34, 'z', 14);                                                  // gas cylinder cap
+  vdB(g, 0.056, 0.062, 0.01, vmDark, 0, 0.032, -0.2);                                                        // second barrel band
+  for (const z of [-0.3, -0.2]) { vdScrew(g, 0.0285, 0.032, z, 'x', 0.004, vmSteel, 1); vdScrew(g, -0.0285, 0.032, z, 'x', 0.004, vmSteel, -1); }
+  vdB(g, 0.012, 0.014, 0.022, vmSteel, 0, 0.04, -0.455);                                                     // bayonet lug
+  for (let k = 0; k < 3; k++) vdB(g, 0.004, 0.011, 0.016, vmVoid, 0, 0.05, -0.495, 0, 0, k * Math.PI / 3); // flash hider slots
+  vdDecal(g, 'CARBINE .30 M2', 0.1, 0.017, -0.0255, 0.035, 0.035, -1, 26);
+  vdC(bolt, 0.009, 0.008, vmSteel, 0.0475, 0.04, 0.03, 'x', 12);                                              // charging handle knob
+  vdB(bolt, 0.01, 0.01, 0.04, vmSteel, 0.03, 0.04, 0.03);
+  vdB(g, 0.012, 0.024, 0.014, vmBlue, 0, -0.052, -0.018);                                                    // safety lever
+  vdB(g, 0.006, 0.018, 0.016, vmSteel, -0.0275, -0.04, -0.03);                                               // magazine catch
+  vdC(g, 0.011, 0.008, vmSteel, -0.026, 0.065, 0.115, 'x', 14);                                              // sight adjusting wheel
+  for (let k = 0; k < 8; k++) vdB(g, 0.0012, 0.004, 0.003, vmDark, -0.0302, 0.065 + Math.cos(k) * 0.009, 0.115 + Math.sin(k) * 0.009);
+  for (let i = 0; i < 3; i++) { vdB(mag, 0.0016, 0.004, 0.056, vmDark, -0.0188, -0.062 - i * 0.065, -0.04 - i * 0.017, 0.15 * i); }  // magazine ribs
+  vdB(mag, 0.0012, 0.18, 0.012, vmVoid, -0.0187, -0.13, -0.052, 0.15);                                       // round window
+  vdB(g, 0.002, 0.026, 0.05, vmVoid, 0.0258, -0.012, 0.32); vdB(g, 0.002, 0.026, 0.05, vmVoid, -0.0258, -0.012, 0.32);  // sling well
+  vdT(g, 0.01, 0.002, vmSteel, 0, -0.05, 0.36, 'x', 12);                                                    // sling swivel
+  vdB(g, 0.052, 0.098, 0.004, vmChecker, 0, -0.01, 0.4235);                                                   // checkered butt plate
+  vdScrew(g, 0.0255, 0.02, 0.18, 'x', 0.004, vmSteel, 1); vdScrew(g, -0.0255, 0.02, 0.18, 'x', 0.004, vmSteel, -1); vdScrew(g, -0.0255, -0.01, 0.34, 'x', 0.004, vmSteel, -1);
+  vdB(g, 0.0012, 0.06, 0.1, vmChecker, 0.0256, 0.0, 0.2); vdB(g, 0.0012, 0.06, 0.1, vmChecker, -0.0256, 0.0, 0.2); // checkered wrist
+  vdT(g, 0.006, 0.0014, vmSteel, 0, 0.045, -0.37, 'x', 10); vdB(g, 0.003, 0.003, 0.2, vmSteel, 0, 0.024, -0.215); // cleaning rod / band hardware
+}
+function detailSlime(g) {
+  const u = g.userData;
+  vdC(g, 0.0345, 0.02, vmHazard, 0, 0.02, -0.12, 'z', 18); vdC(g, 0.034, 0.012, vmSteel, 0, 0.02, -0.3, 'z', 18);   // nozzle bands
+  for (let i = 0; i < 4; i++) vdC(g, 0.04, 0.005, vmDark, 0, 0.02, -0.17 - i * 0.04, 'z', 18);
+  // pressure gauge
+  vdC(g, 0.021, 0.008, vmSteel, -0.0385, 0.0, 0.03, 'x', 22);
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128; const c = cv.getContext('2d'); c.fillStyle = '#e6e6d8'; c.fillRect(0, 0, 128, 128);
+  c.strokeStyle = '#111'; c.lineWidth = 2; for (let k = 0; k <= 10; k++) { const a = Math.PI * 0.8 + (k / 10) * Math.PI * 1.4; c.beginPath(); c.moveTo(64 + Math.cos(a) * 48, 64 + Math.sin(a) * 48); c.lineTo(64 + Math.cos(a) * 58, 64 + Math.sin(a) * 58); c.stroke(); }
+  c.fillStyle = '#cc2222'; c.beginPath(); c.moveTo(64, 64); c.arc(64, 64, 52, Math.PI * 0.8 + Math.PI * 1.4 * 0.8, Math.PI * 2.2); c.lineTo(64, 64); c.fill(); c.fillStyle = '#e6e6d8'; c.beginPath(); c.arc(64, 64, 40, 0, 7); c.fill();
+  const dial = new THREE.Mesh(new THREE.CircleGeometry(0.0175, 24), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv) })); dial.position.set(-0.0428, 0.0, 0.03); dial.rotation.y = -Math.PI / 2; g.add(dial);
+  const needle = vdB(g, 0.0012, 0.0016, 0.014, vmLedR, -0.0432, 0.0, 0.03, 0, 0, 0); needle.rotation.x = 0.6; needle.position.set(-0.0432, 0.004, 0.03);
+  vdT(g, 0.0195, 0.002, vmSteel, -0.0425, 0.0, 0.03, 'x', 22);
+  // valve wheel
+  vdT(g, 0.014, 0.003, vmDark, -0.041, -0.03, -0.05, 'x', 18); vdC(g, 0.004, 0.012, vmSteel, -0.039, -0.03, -0.05, 'x', 10);
+  for (let k = 0; k < 3; k++) { const a = k * Math.PI / 3; vdB(g, 0.003, 0.028 * Math.cos(a) + 0.002, 0.028 * Math.sin(a) + 0.002, vmDark, -0.041, -0.03, -0.05); }
+  // hoses from tank caps to the nozzle
+  for (const sx of [-1, 1]) {
+    vdTube(g, [sx * 0.044, 0.07, -0.07], [sx * 0.05, 0.04, -0.09], 0.0065, 0.0065, vmRubber, 8); vdTube(g, [sx * 0.05, 0.04, -0.09], [sx * 0.03, 0.02, -0.12], 0.0065, 0.0065, vmRubber, 8);
+    vdS(g, 0.0068, vmRubber, sx * 0.05, 0.04, -0.09); vdBand(g, [sx * 0.04, 0.03, -0.108], [sx * 0.5, -0.4, -0.5], 0.0075, 0.002, vmSteel);
+    for (const tz of [-0.04, 0.12]) vdBand(g, [sx * 0.044, 0.07, tz], [0, 0, 1], 0.0285, 0.0022, vmSteel);       // tank bands
+    for (let k = 0; k < 6; k++) vdB(g, 0.0015, 0.0015, 0.008, vmDark, sx * 0.0355 + sx * 0.0, 0.07, -0.02 + k * 0.025);     // gauge marks
+    vdC(g, 0.012, 0.01, vmSteel, sx * 0.044, 0.07, 0.15, 'z', 12);                                               // fill cap
+  }
+  for (let k = 0; k < 14; k++) { const t = k / 13; vdS(g, 0.0034, vmSteel, -0.036, 0.034 - 0.0 * t, -0.075 + t * 0.19, 1, 1, 1); vdS(g, 0.0034, vmSteel, 0.036, 0.034, -0.075 + t * 0.19); }  // rivets
+  vdB(g, 0.0012, 0.02, 0.15, vmHazard, -0.0358, 0.03, 0.03);
+  vdDecal(g, 'ACID PRESSURE', 0.085, 0.015, -0.0358, -0.03, 0.095, -1, 26);
+  vmGuardSlime(g);
+  vdB(g, 0.041, 0.06, 0.004, vmRubber, 0, -0.01, 0.302);                                                         // butt pad
+}
+function vmGuardSlime(g) { vmGuard(g, -0.045, 0.035, 0.022); }
+function detailRail(g) {
+  const u = g.userData;
+  for (let k = 0; k < 18; k++) { const z = -0.03 - k * 0.032; vdB(g, 0.016, 0.0018, 0.005, vmDark, -0.02, 0.0435, z); vdB(g, 0.016, 0.0018, 0.005, vmDark, 0.02, 0.0435, z); }   // rail grooves
+  vdB(g, 0.002, 0.002, 0.6, vmLedC, -0.0115, 0.0435, -0.3); vdB(g, 0.002, 0.002, 0.6, vmLedC, 0.0115, 0.0435, -0.3);                       // glowing conductor edges
+  for (let i = 0; i < 5; i++) { const z = -0.1 - i * 0.11; vdT(g, 0.0345, 0.0032, vmCopper, 0, 0.035, z - 0.0125, 'z', 26); vdT(g, 0.0345, 0.0032, vmCopper, 0, 0.035, z + 0.0125, 'z', 26); }  // copper windings
+  vdB(g, 0.074, 0.044, 0.012, vmDark, 0, 0.035, -0.605); vdB(g, 0.05, 0.02, 0.004, vmLedC, 0, 0.035, -0.613);                                // muzzle emitter
+  for (let k = 0; k < 3; k++) { const z = -0.03 + k * 0.07; vdC(g, 0.0125, 0.065, vmDark, -0.0435, 0.0, z + 0.07, 'y', 14); vdT(g, 0.0128, 0.0025, vmLedC, -0.0435, 0.0, z + 0.07, 'y', 14); vdT(g, 0.0128, 0.0025, vmLedC, -0.0435, 0.026, z + 0.07, 'y', 14); }  // capacitor cells
+  for (let k = 0; k < 8; k++) vdB(g, 0.003, 0.006, 0.012, k < 6 ? vmLedC : vmLedDim, -0.0365, 0.028, -0.03 + k * 0.02);                        // charge ladder
+  vdTube(g, [-0.036, 0.012, 0.0], [-0.034, 0.012, -0.2], 0.005, 0.005, vmRubber, 8); vdTube(g, [-0.036, 0.02, 0.0], [-0.03, 0.026, -0.2], 0.004, 0.004, vmRubber, 8); // cable bundle
+  for (let k = 0; k < 4; k++) vdBand(g, [-0.035, 0.016, -0.03 - k * 0.05], [0, 0, 1], 0.0085, 0.0016, vmSteel);
+  for (let i = 0; i < 9; i++) vdB(g, 0.053, 0.014, 0.004, vmSteel, 0, 0.034, 0.19 + i * 0.016);              // heat sink fins
+  vdDecal(g, 'RAIL-9  MK II', 0.1, 0.018, -0.0355, -0.02, 0.1, -1, 26, 'rgba(120,225,255,0.75)');
+  vdB(g, 0.0012, 0.04, 0.2, vmChecker, 0.0256, -0.01, 0.28); vdB(g, 0.0012, 0.04, 0.2, vmChecker, -0.0256, -0.01, 0.28);
+  vdB(g, 0.052, 0.07, 0.004, vmRubber, 0, -0.01, 0.392);
+  vmGuard(g, -0.045, 0.065, 0.025);
+  for (let k = 0; k < 4; k++) vdScrew(g, -0.0355, -0.025 + (k % 2) * 0.05, 0.0 + Math.floor(k / 2) * 0.13, 'x', 0.004, vmSteel, -1);
+}
+function detailSaw(g) {
+  const u = g.userData;
+  vdC(g, 0.032, 0.012, vmSteel, 0, 0.0, -0.255, 'x', 20);                                                    // drive sprocket cover
+  vdScrew(g, 0.0, 0.0, -0.255, 'x', 0.006, vmSteel, 1); vdScrew(g, -0.0, 0.0, -0.255, 'x', 0.006, vmSteel, -1);
+  for (let k = 0; k < 6; k++) vdB(g, 0.152, 0.004, 0.026, vmVoid, 0, 0.03 - k * 0.012 + 0.03, -0.04);        // motor vents
+  vdB(g, 0.0012, 0.06, 0.16, vmHazard, -0.0765, 0.0, -0.12);
+  vdDecal(g, 'DANGER  CHAIN', 0.12, 0.02, -0.0765, 0.045, -0.12, -1, 26);
+  vdC(g, 0.02, 0.05, vmDark, 0.0, 0.1, -0.08, 'x', 14);                                                      // pull-start housing
+  vdTube(g, [0.0, 0.085, -0.02], [0.0, 0.085, -0.16], 0.012, 0.012, vmRubber, 12);                           // top handle bar
+  vdTube(g, [0.0, 0.07, -0.04], [0.0, 0.085, -0.04], 0.008, 0.008, vmSteel, 8); vdTube(g, [0.0, 0.07, -0.14], [0.0, 0.085, -0.14], 0.008, 0.008, vmSteel, 8);
+  for (let k = 0; k < 6; k++) vdBand(g, [0, 0.085, -0.03 - k * 0.02], [0, 0, 1], 0.0125, 0.0012, vmDark);
+  for (let k = 0; k < 4; k++) vdScrew(g, 0.0765, -0.02 + (k % 2) * 0.035, -0.06 - Math.floor(k / 2) * 0.1, 'x', 0.005, vmSteel, 1);
+  for (let k = 0; k < 14; k++) vdB(g, 0.044, 0.008, 0.004, vmSteel, 0, 0.0, -0.27 - k * 0.04 + 0.0);        // chain links
+  // gloved left hand clamped round the top handle
+  const lh = new THREE.Group(); g.add(lh);
+  for (let i = 0; i < 4; i++) { const z = -0.1 - i * 0.022 + 0.0; vmFinger(lh, [[0.05, 0.12, z], [0.026, 0.135, z], [-0.006, 0.133, z], [-0.026, 0.113, z], [-0.02, 0.091, z]], [0.0115, 0.011, 0.0102, 0.0094, 0.0084].map(v => v * (i === 3 ? 0.85 : 1)), vmGlove, vmPad); }
+  vdB(lh, 0.02, 0.05, 0.1, vmGlove, 0.055, 0.115, -0.08); vdS(lh, 0.026, vmGlove, 0.052, 0.098, -0.02, 0.9, 1.0, 1.1);
+  vmFinger(lh, [[0.05, 0.1, -0.03], [0.02, 0.1, -0.045], [-0.01, 0.092, -0.06], [-0.026, 0.092, -0.075]], [0.0145, 0.0128, 0.0115, 0.0102], vmGlove, vmPad);
+  vmArm(g, [0.06, 0.112, -0.02], [0.2, -0.22, 0.45], 0.085);
+}
+detailPistol(gunModels.pistol); detailShotgun(gunModels.shotgun); detailGrenade(gunModels.grenade); detailRifle(gunModels.rifle); detailSlime(gunModels.slime); detailRail(gunModels.rail); detailSaw(gunModels.saw);
+
 const muzzleZ0 = -0.27;
 const muzzleZ = { pistol: -0.27, shotgun: -0.37, grenade: -0.37, rifle: -0.5, slime: -0.44, rail: -0.62, saw: -0.5 };
 const muzzleY = { pistol: 0.046, shotgun: 0.05, grenade: 0, rifle: 0.05, slime: 0.02, rail: 0.035, saw: 0 };
