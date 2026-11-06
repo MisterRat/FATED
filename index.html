@@ -42,7 +42,7 @@ window.addEventListener('error', e => {
 // =====================================================================================
 // CONFIG - every number you are likely to tune lives here.
 // =====================================================================================
-const GAME_VERSION = '3.12'; // bump on every revision (shown on the main menu)
+const GAME_VERSION = '3.13'; // bump on every revision (shown on the main menu)
 const CFG = {
   player: {
     speed: 4, radius: 0.3, maxHp: 100,
@@ -2615,15 +2615,34 @@ function vdDecal(g, text, w, h, x, y, z, side, fontPx, col) { // engraved letter
   const tex = new THREE.CanvasTexture(cv); tex.anisotropy = 8;
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })); m.position.set(x + side * 0.0007, y, z); m.rotation.y = side < 0 ? -Math.PI / 2 : Math.PI / 2; g.add(m); return m; }
 
-// --- Hands: tactical gloves with segmented fingers, hard knuckle plates, stitched cuffs and tapered camo sleeves ---
+// --- Hands: tactical gloves with segmented fingers, stitched cuffs and tapered camo sleeves ---
 function vmFinger(g, pts, radii, mat, padMat) { // a jointed finger: tapered segments, round knuckles, leather tip pad
   for (let i = 0; i < pts.length - 1; i++) vdTube(g, pts[i], pts[i + 1], radii[i], radii[i + 1], mat, 10);
   for (let i = 0; i < pts.length; i++) vdS(g, radii[i] * 1.03, mat, pts[i][0], pts[i][1], pts[i][2]);
   const n = pts.length - 1, t = pts[n], p = pts[n - 1], d = new THREE.Vector3(t[0] - p[0], t[1] - p[1], t[2] - p[2]).normalize();
-  if (padMat) { const pd = vdS(g, radii[n] * 0.95, padMat, t[0] + d.x * radii[n] * 0.35, t[1] + d.y * radii[n] * 0.35, t[2] + d.z * radii[n] * 0.35, 1, 1, 0.8); pd.quaternion.setFromUnitVectors(vmZV, d); }
+  if (padMat) vmTipPad(g, pts, radii, padMat, null);
   for (let i = 1; i < pts.length - 1; i++) { // flex creases at the joints
     const a = pts[i - 1], b = pts[i + 1]; vdBand(g, pts[i], [b[0] - a[0], b[1] - a[1], b[2] - a[2]], radii[i] * 1.0, 0.0012, vmDark);
   }
+}
+function vmTipPad(g, pts, radii, padMat, inward) { // leather fingertip pad: a flat patch on the gripping side of the tip, not a cap on the end
+  const n = pts.length - 1, t = new THREE.Vector3(...pts[n]), p = new THREE.Vector3(...pts[n - 1]), q = new THREE.Vector3(...(pts[n - 2] || pts[n - 1])), d = t.clone().sub(p).normalize();
+  let c = inward ? new THREE.Vector3(...inward).normalize() : d.clone().sub(p.clone().sub(q).normalize());
+  if (c.length() < 0.15) c = new THREE.Vector3(0, -1, 0);
+  c.addScaledVector(d, -c.dot(d)); if (c.length() < 0.05) c = new THREE.Vector3(0, -1, 0); c.normalize();
+  const r = radii[n], pd = vdS(g, r, padMat, t.x + c.x * r * 0.62 - d.x * r * 0.2, t.y + c.y * r * 0.62 - d.y * r * 0.2, t.z + c.z * r * 0.62 - d.z * r * 0.2, 0.9, 0.9, 0.4);
+  pd.quaternion.setFromUnitVectors(vmZV, c);
+}
+function vmThumb(g, pts, radii, mat, padMat, inward) { // a human-shaped thumb: thick base into a thenar mound, bent first joint, wide flattened tip with a pad
+  const n = pts.length - 1;
+  for (let i = 0; i < n; i++) vdTube(g, pts[i], pts[i + 1], radii[i], radii[i + 1], mat, 12);
+  for (let i = 0; i <= n; i++) vdS(g, radii[i] * (i === n - 1 ? 1.12 : 1.03), mat, pts[i][0], pts[i][1], pts[i][2]);               // the middle knuckle bulges
+  const a = new THREE.Vector3(...pts[0]), b = new THREE.Vector3(...pts[1]), dir = a.clone().sub(b).normalize();
+  vdS(g, radii[0] * 1.55, mat, a.x + dir.x * radii[0] * 0.55, a.y + dir.y * radii[0] * 0.55, a.z + dir.z * radii[0] * 0.55, 1, 0.9, 1.15);   // thenar mound where the thumb meets the palm
+  const e = pts[n], pe = pts[n - 1], dd = new THREE.Vector3(e[0] - pe[0], e[1] - pe[1], e[2] - pe[2]).normalize();
+  const tip = vdS(g, radii[n] * 1.05, mat, e[0] + dd.x * radii[n] * 0.3, e[1] + dd.y * radii[n] * 0.3, e[2] + dd.z * radii[n] * 0.3, 1.1, 0.85, 1.2); tip.quaternion.setFromUnitVectors(vmZV, dd); // broad, slightly flat thumb tip
+  if (padMat) vmTipPad(g, pts, radii, padMat, inward || [1, 0, 0]);
+  vdBand(g, pts[n - 1], [pts[n][0] - pts[n - 2][0], pts[n][1] - pts[n - 2][1], pts[n][2] - pts[n - 2][2]], radii[n - 1] * 1.08, 0.0013, vmDark);      // stitched joint crease
 }
 function vmArm(g0, a, b, w, watch) {
   const g = new THREE.Group(); g.userData.hand = true; g0.add(g); // sleeve with a stitched glove gauntlet at the wrist, a rolled cuff and an optional watch
@@ -2641,8 +2660,8 @@ function vmArm(g0, a, b, w, watch) {
     const wp = new THREE.Vector3().fromArray(at(0.095));
     vdBand(g, wp.toArray(), d.toArray(), r * 0.93, 0.004, vmRubber);
     const face = new THREE.Mesh(new THREE.CylinderGeometry(0.0185, 0.0185, 0.007, 20), vmDark); face.position.copy(wp).addScaledVector(n, r * 0.93 + 0.004); face.quaternion.setFromUnitVectors(vmUpV, n); g.add(face);
-    const cv = document.createElement('canvas'); cv.width = cv.height = 64; const c = cv.getContext('2d'); c.fillStyle = '#04120a'; c.fillRect(0, 0, 64, 64); c.fillStyle = '#7dff9a'; c.font = 'bold 20px monospace'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('06:12', 32, 28); c.fillRect(14, 42, 36, 2);
-    const dial = new THREE.Mesh(new THREE.CircleGeometry(0.0155, 20), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv) })); dial.position.copy(face.position).addScaledVector(n, 0.0038); dial.quaternion.setFromUnitVectors(vmZV, n); dial.rotation.z += 0; g.add(dial);
+    const cv = document.createElement('canvas'); cv.width = cv.height = 64; const c = cv.getContext('2d'); const wtex = new THREE.CanvasTexture(cv); let wlast = ''; const wdraw = () => { const d0 = new Date(), t = String(d0.getHours()).padStart(2, '0') + ':' + String(d0.getMinutes()).padStart(2, '0'); if (t === wlast) return; wlast = t; c.fillStyle = '#04120a'; c.fillRect(0, 0, 64, 64); c.fillStyle = '#7dff9a'; c.font = 'bold 20px monospace'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(t, 32, 28); c.fillRect(14, 42, 36, 2); wtex.needsUpdate = true; }; wdraw(); const wiv = setInterval(wdraw, 1000); if (wiv && wiv.unref) wiv.unref(); // the watch shows the player's own local time
+    const dial = new THREE.Mesh(new THREE.CircleGeometry(0.0155, 20), new THREE.MeshBasicMaterial({ map: wtex })); dial.position.copy(face.position).addScaledVector(n, 0.0038); dial.quaternion.setFromUnitVectors(vmZV, n); dial.rotation.z += 0; g.add(dial);
   }
 }
 function vmGripHand(g, x, y, z, rx, o = {}) { // right hand wrapped round a grip centred at (x,y,z); o.trigger = world point for the index fingertip
@@ -2653,7 +2672,6 @@ function vmGripHand(g, x, y, z, rx, o = {}) { // right hand wrapped round a grip
   vdB(h, 0.024, 0.092, 0.07, vmPad, hw + 0.013, 0.0, 0.016);                                 // padded palm
   vdS(h, 0.03, vmGlove, hw + 0.031, -0.04, 0.05, 0.8, 1.15, 1.0);                            // heel of the hand
   vdS(h, 0.027, vmGlove, hw + 0.029, 0.03, 0.05, 0.85, 1.1, 1.0);                            // thumb muscle
-  for (let i = 0; i < 4; i++) { vdS(h, 0.0105, vmRubber, hw + 0.037, rows[i], -0.012, 0.6, 1.0, 1.0); vdB(h, 0.006, 0.02, 0.012, vmDark, hw + 0.04, rows[i], -0.012); } // hard knuckle plates
   vdB(h, 0.004, 0.09, 0.0015, vmDark, hw + 0.0345, 0, 0.062);                                // stitched seam at the wrist
   // fingers
   const T = o.trigger ? new THREE.Vector3(o.trigger[0] - x, o.trigger[1] - y, o.trigger[2] - z).applyAxisAngle(new THREE.Vector3(1, 0, 0), -rx) : null;
@@ -2665,8 +2683,7 @@ function vmGripHand(g, x, y, z, rx, o = {}) { // right hand wrapped round a grip
     vmFinger(h, pts, r, vmGlove, vmPad);
   }
   // thumb along the left side
-  vmFinger(h, [[hw + 0.024, 0.014 + tu, 0.045 + tb], [hw + 0.012, 0.03 + tu, hd + 0.012 + tb], [-hw - 0.012, 0.038 + tu, hd - 0.004 + tb], [-hw - 0.018, 0.043 + tu, hd - 0.04 + tb], [-hw - 0.019, 0.046 + tu, hd - 0.062 + tb]], [0.0155, 0.0138, 0.0128, 0.0116, 0.0104], vmGlove, vmPad);
-  vdS(h, 0.0075, vmRubber, -hw - 0.0185, 0.0545 + tu, hd - 0.04 + tb, 1, 0.5, 1.3);                     // thumb guard
+  vmThumb(h, [[hw + 0.024, 0.014 + tu, 0.045 + tb], [hw + 0.012, 0.03 + tu, hd + 0.012 + tb], [-hw - 0.012, 0.038 + tu, hd - 0.004 + tb], [-hw - 0.018, 0.043 + tu, hd - 0.04 + tb], [-hw - 0.019, 0.046 + tu, hd - 0.062 + tb]], [0.0155, 0.0138, 0.0128, 0.0116, 0.0104], vmGlove, vmPad);
   h.position.set(x, y, z); h.rotation.x = rx; g.add(h);
   vmArm(g, [x + 0.07, y - 0.03, z + 0.05], [x + 0.2, y - 0.32, z + 0.55], 0.085);
 }
@@ -2675,11 +2692,9 @@ function vmCupHand(g, x, y, z, o = {}) { // left hand cupping a forend/handguard
   vdB(h, hw * 2 + 0.03, 0.014, 0.08, vmPad, -0.004, -u - 0.01, 0.0);                          // padded palm
   vdS(h, 0.03, vmGlove, -hw - 0.03, -u - 0.008, 0.032, 1.0, 0.9, 0.9);                        // heel
   vdB(h, 0.012, 0.03, 0.088, vmGlove, -hw - 0.034, -u + 0.002, 0.0);                          // back of hand (faces the camera)
-  vdB(h, 0.0025, 0.026, 0.084, vmDark, -hw - 0.0405, -u + 0.002, 0.0);
   for (let i = 0; i < 4; i++) { const z0 = zf + i * sp, s = sc[i], r = rad.map(v => v * (0.94 + 0.06 * s));
-    vmFinger(h, [[-hw - 0.024, -u - 0.004, z0], [-hw * 0.25, -u - 0.0115, z0], [hw + 0.004, -u - 0.0085, z0], [hw + 0.0115, -u + 0.018, z0], [hw + 0.01, -u + 0.04 * s, z0 + 0.002]], r, vmGlove, vmPad);
-    vdS(h, 0.0105, vmRubber, -hw - 0.04, -u + 0.004, z0, 0.6, 1.0, 1.0); }                    // knuckle plates
-  vmFinger(h, [[-hw - 0.024, -u + 0.004, zf - 0.008], [-hw - 0.016, -u + 0.026, zf - 0.024], [-hw - 0.013, -u + 0.036, zf - 0.05], [-hw - 0.012, -u + 0.04, zf - 0.072]], [0.0155, 0.0138, 0.0124, 0.0108].map(v => v * rs), vmGlove, vmPad);
+    vmFinger(h, [[-hw - 0.024, -u - 0.004, z0], [-hw * 0.25, -u - 0.0115, z0], [hw + 0.004, -u - 0.0085, z0], [hw + 0.0115, -u + 0.018, z0], [hw + 0.01, -u + 0.04 * s, z0 + 0.002]], r, vmGlove, vmPad); }
+  vmThumb(h, [[-hw - 0.024, -u + 0.004, zf - 0.008], [-hw - 0.016, -u + 0.026, zf - 0.024], [-hw - 0.013, -u + 0.036, zf - 0.05], [-hw - 0.012, -u + 0.04, zf - 0.072]], [0.0155, 0.0138, 0.0124, 0.0108].map(v => v * rs), vmGlove, vmPad);
   vmArm(h, [-hw - 0.03, -u - 0.01, 0.05], [-0.2, -0.34, 0.55], 0.085, true);
   h.position.set(x, y, z); g.add(h);
   return h;
@@ -2695,8 +2710,8 @@ function vmWristHand(g, x, y, z, o) { // right hand wrapped round the wrist of a
   for (let i = 0; i < 4; i++) { const zi = (i - 1.5) * sp, s = sc[i], r = rad.map(v => v * (0.94 + 0.06 * s)); let pts;
     if (i === 0 && T) { r.forEach((v, k) => r[k] = v * 0.86); pts = [[hw + 0.024, bot + 0.02, zi], [hw + 0.012, T.y - 0.002, T.z + 0.05], [hw + 0.004, T.y, T.z + 0.008], [0.012, T.y, T.z + 0.003], [-0.004, T.y, T.z + 0.001]]; }
     else pts = [[hw + 0.024, bot + 0.02, zi], [hw + 0.0065, bot - 0.0075, zi], [0.0, bot - 0.0125, zi], [-hw - 0.0065, bot - 0.0075, zi], [-hw - 0.0125, bot + 0.019, zi], [-hw - 0.0115, bot + 0.04 * s, zi]];
-    vmFinger(h, pts, r, vmGlove, vmPad); vdS(h, 0.0105 * rs, vmRubber, hw + 0.04, bot + 0.02, zi, 0.6, 1.0, 1.0); }
-  vmFinger(h, [[hw + 0.024, ymid + 0.02, 0.05], [hw + 0.002, top + 0.012, 0.045], [-hw - 0.004, top + 0.011, 0.02], [-hw - 0.012, top - 0.002, -0.01], [-hw - 0.014, top - 0.004, -0.03]], [0.0155, 0.0138, 0.0128, 0.0116, 0.0104].map(v => v * rs), vmGlove, vmPad);
+    vmFinger(h, pts, r, vmGlove, vmPad); }
+  vmThumb(h, [[hw + 0.024, ymid + 0.02, 0.05], [hw + 0.002, top + 0.012, 0.045], [-hw - 0.004, top + 0.011, 0.02], [-hw - 0.012, top - 0.002, -0.01], [-hw - 0.014, top - 0.004, -0.03]], [0.0155, 0.0138, 0.0128, 0.0116, 0.0104].map(v => v * rs), vmGlove, vmPad);
   h.position.set(x, y, z); g.add(h);
   vmArm(g, [x + 0.07, y - 0.03, z + 0.05], [x + 0.2, y - 0.32, z + 0.55], 0.085);
 }
@@ -2849,7 +2864,7 @@ function makeSlimeModel() {
   g.add(vmBox(0.04, 0.06, 0.2, vmDark, 0, -0.01, 0.2));                           // stock
   g.add(vmBox(0.035, 0.13, 0.04, vmDark, 0, -0.09, 0.06, -0.2));                   // grip
   g.add(vmBox(0.012, 0.012, 0.012, new THREE.MeshBasicMaterial({ color: 0xaaff66 }), 0, 0.055, -0.1)); // sight dot
-  vmGripHand(g, 0, -0.102, 0.06, -0.2, { trigger: [0, -0.0602, 0.021], w: 0.04, d: 0.046, thumbUp: -0.012 });
+  vmGripHand(g, 0, -0.102, 0.06, -0.2, { trigger: [0, -0.0645, 0.017], w: 0.04, d: 0.046, thumbUp: -0.012 });
   const lh = vmCupHand(g, 0, 0.018, -0.2, { w: 0.036 });
   g.userData = { type: 'slime', lh, fills };
   return g;
@@ -3052,7 +3067,7 @@ function detailSaw(g) {
   const lh = new THREE.Group(); lh.userData.hand = true; g.add(lh);
   for (let i = 0; i < 4; i++) { const z = -0.1 - i * 0.022; vmFinger(lh, [[0.05, 0.14, z], [0.026, 0.155, z], [-0.006, 0.153, z], [-0.026, 0.133, z], [-0.021, 0.111, z]], [0.0115, 0.011, 0.0102, 0.0094, 0.0084].map(v => v * 0.88 * (i === 3 ? 0.85 : 1)), vmGlove, vmPad); }
   vdB(lh, 0.02, 0.05, 0.1, vmGlove, 0.058, 0.145, -0.08); vdS(lh, 0.026, vmGlove, 0.056, 0.13, -0.02, 0.9, 1.0, 1.1);
-  vmFinger(lh, [[0.05, 0.13, -0.03], [0.02, 0.14, -0.045], [-0.01, 0.14, -0.06], [-0.03, 0.125, -0.075]], [0.0145, 0.0128, 0.0115, 0.0102].map(v => v * 0.88), vmGlove, vmPad);
+  vmThumb(lh, [[0.05, 0.13, -0.03], [0.02, 0.14, -0.045], [-0.01, 0.14, -0.06], [-0.03, 0.125, -0.075]], [0.0145, 0.0128, 0.0115, 0.0102].map(v => v * 0.88), vmGlove, vmPad);
   vmArm(g, [0.065, 0.14, -0.02], [0.2, -0.22, 0.45], 0.085);
 }
 detailPistol(gunModels.pistol); detailShotgun(gunModels.shotgun); detailGrenade(gunModels.grenade); detailRifle(gunModels.rifle); detailSlime(gunModels.slime); detailRail(gunModels.rail); detailSaw(gunModels.saw);
