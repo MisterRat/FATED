@@ -42,7 +42,7 @@ window.addEventListener('error', e => {
 // =====================================================================================
 // CONFIG - every number you are likely to tune lives here.
 // =====================================================================================
-const GAME_VERSION = '3.10'; // bump on every revision (shown on the main menu)
+const GAME_VERSION = '3.11'; // bump on every revision (shown on the main menu)
 const CFG = {
   player: {
     speed: 4, radius: 0.3, maxHp: 100,
@@ -2570,6 +2570,7 @@ function vmMap(size, base, fn, rep) { const t = makeTexture(size, (c, s) => { c.
 function vmApply(m, tex) { m.color.set(0xffffff); m.map = tex; m.needsUpdate = true; return m; }
 vmApply(vmMetal, vmMap(256, '#50555d', (c, s) => { vmStreaks(c, s, 700, 0.3, 90); vmNoise(c, s, 500, 0.12, 1); }));
 vmApply(vmSteel, vmMap(256, '#585e67', (c, s) => { vmStreaks(c, s, 800, 0.3, 80); vmNoise(c, s, 400, 0.2, 1); }));
+vmSteel.color.set(0xa4a4a4); vmSteel.specular.set(0x2a2a2a);
 vmApply(vmBlue, vmMap(256, '#22262d', (c, s) => { vmStreaks(c, s, 500, 0.18, 70); vmNoise(c, s, 700, 0.14, 1); for (let i = 0; i < 70; i++) { c.fillStyle = 'rgba(150,154,162,0.35)'; c.fillRect(Math.random() * s, Math.random() * s, 1 + Math.random() * 2, 1); } }));
 vmApply(vmDark, vmMap(128, '#2c2c32', (c, s) => { vmNoise(c, s, 900, 0.13, 1); }));
 vmApply(vmGreen, vmMap(256, '#3f5539', (c, s) => { vmNoise(c, s, 1200, 0.14, 1); vmStreaks(c, s, 200, 0.12, 40); for (let i = 0; i < 40; i++) { c.fillStyle = 'rgba(190,200,160,0.25)'; c.fillRect(Math.random() * s, Math.random() * s, 2, 1); } }));
@@ -2683,26 +2684,49 @@ function vmCupHand(g, x, y, z, o = {}) { // left hand cupping a forend/handguard
   return h;
 }
 
+// --- rounded solids: profile outlines extruded with bevelled edges (no more sharp-edged blocks) ---
+function vmShape(pts) { // polygon [[u, v, cornerRadius], ...] with smoothly rounded corners
+  const n = pts.length, P = pts.map(p => new THREE.Vector2(p[0], p[1])), sh = new THREE.Shape();
+  for (let i = 0; i < n; i++) {
+    const p = P[i], a = P[(i + n - 1) % n].clone().sub(p), c = P[(i + 1) % n].clone().sub(p), rr = Math.min(pts[i][2] || 0, a.length() / 2.1, c.length() / 2.1);
+    const A = p.clone().add(a.normalize().multiplyScalar(rr)), C = p.clone().add(c.normalize().multiplyScalar(rr));
+    if (i === 0) sh.moveTo(A.x, A.y); else sh.lineTo(A.x, A.y);
+    if (rr > 0) sh.quadraticCurveTo(p.x, p.y, C.x, C.y); else sh.lineTo(C.x, C.y);
+  }
+  sh.closePath(); return sh;
+}
+// Outline pts are (z, y) in gun space, extruded across x for `width`; b = edge rounding radius across the width.
+function vmProf(pts, width, b, mat, x = 0, y = 0, z = 0, rx = 0) {
+  b = Math.min(b, width * 0.4); const depth = width - 2 * b;
+  const geo = new THREE.ExtrudeGeometry(vmShape(pts), { depth: Math.max(0.0005, depth), bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelOffset: -b, bevelSegments: 4, curveSegments: 6 });
+  geo.translate(0, 0, -depth / 2); geo.rotateY(-Math.PI / 2);
+  const uv = geo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 5, uv.getY(i) * 5);
+  const m = new THREE.Mesh(geo, mat === vmWood && vmWoodSet ? vmWoodSet[0] : mat); m.position.set(x, y, z); m.rotation.x = rx; return m;
+}
+function vmRound(w, h, d, r, mat, x, y, z, rx = 0) { // a box with all edges rounded
+  const q = Math.min(r, h / 2.2, d / 2.2); return vmProf([[-d / 2, -h / 2, q], [-d / 2, h / 2, q], [d / 2, h / 2, q], [d / 2, -h / 2, q]], w, r * 0.8, mat, x, y, z, rx);
+}
+
 // --- Colt 1911 ---
 function makePistolModel() {
   const g = new THREE.Group(), sl = new THREE.Group(), mag = new THREE.Group();
-  sl.add(vmBox(0.062, 0.062, 0.3, vmBlue, 0, 0.046, -0.1));                       // slide
+  sl.add(vmProf([[-0.25, 0.017, 0.004], [-0.25, 0.068, 0.01], [-0.236, 0.077, 0.008], [0.03, 0.077, 0.008], [0.05, 0.059, 0.012], [0.05, 0.017, 0.004]], 0.062, 0.011, vmBlue)); // slide (rounded top edges, sloped nose and tail)
   for (let i = 0; i < 5; i++) sl.add(vmBox(0.064, 0.05, 0.004, vmDark, 0, 0.046, i * 0.011)); // rear serrations
   sl.add(vmBox(0.064, 0.02, 0.06, vmDark, 0, 0.06, -0.06));                       // ejection port
   sl.add(vmBox(0.01, 0.014, 0.012, vmBlue, 0, 0.078, -0.235));
   sl.add(vmBox(0.005, 0.005, 0.001, vmDot, 0, 0.0805, -0.2285));                 // front dot                    // front sight (top = sight line)
   vmRearSight(sl, 0, 0.085, 0.03, 0.077, { w: 0.009, gap: 0.017, up: 0.013, down: 0.006, dot: vmDot });                                            // rear sight
-  g.add(vmBox(0.056, 0.04, 0.25, vmSteel, 0, 0, -0.045));                         // frame
+  g.add(vmProf([[-0.172, 0.012, 0.004], [-0.172, -0.008, 0.005], [-0.12, -0.021, 0.01], [0.0, -0.025, 0.012], [0.072, -0.02, 0.012], [0.082, 0.0, 0.012], [0.076, 0.02, 0.006], [-0.172, 0.02, 0.004]], 0.054, 0.009, vmSteel)); // frame with dust cover
   g.add(vmCyl(0.014, 0.025, vmSteel, 0, 0.045, -0.255));                          // barrel bushing / muzzle
-  g.add(vmBox(0.05, 0.03, 0.04, vmBlue, 0, 0.015, 0.075));                        // beavertail grip safety
+  g.add(vmRound(0.05, 0.03, 0.04, 0.012, vmBlue, 0, 0.015, 0.075));              // beavertail grip safety
   g.add(vmBox(0.012, 0.03, 0.02, vmDark, 0, 0.06, 0.068));                        // spur hammer
   g.add(vmBox(0.004, 0.015, 0.03, vmBlue, -0.03, 0.025, 0.02));                   // thumb safety
-  g.add(vmBox(0.056, 0.15, 0.085, vmDark, 0, -0.095, 0.065, -0.28));              // grip (butt leans back)
-  g.add(vmBox(0.006, 0.13, 0.07, vmWood, -0.031, -0.095, 0.065, -0.28));          // walnut panels
-  g.add(vmBox(0.006, 0.13, 0.07, vmWood, 0.031, -0.095, 0.065, -0.28));
+  g.add(vmRound(0.054, 0.15, 0.085, 0.02, vmDark, 0, -0.095, 0.065, -0.28));      // grip (butt leans back)
+  g.add(vmRound(0.007, 0.13, 0.07, 0.014, vmWood, -0.0305, -0.095, 0.065, -0.28));  // walnut panels
+  g.add(vmRound(0.007, 0.13, 0.07, 0.014, vmWood, 0.0305, -0.095, 0.065, -0.28));
   vmGuard(g, -0.046, -0.04, 0.026);
   mag.add(vmBox(0.045, 0.14, 0.065, vmSteel, 0, -0.1, 0.065, -0.28));             // magazine (hidden in grip)
-  mag.add(vmBox(0.062, 0.016, 0.095, vmDark, 0, -0.176, 0.088, -0.28));           // magazine base
+  mag.add(vmRound(0.062, 0.016, 0.095, 0.008, vmDark, 0, -0.176, 0.088, -0.28));  // magazine base
   g.add(sl, mag);
   vmGripHand(g, 0, -0.095, 0.065, -0.28, { trigger: [0, -0.0356, -0.034] });
   const lh = vmCupHand(g, 0, -0.154, 0.07, { w: 0.031 });
@@ -2716,14 +2740,14 @@ function makeShotgunModel() {
   g.add(vmCyl(0.024, 0.02, vmDark, 0, 0.05, -0.355));                             // muzzle ring
   g.add(vmCyl(0.014, 0.28, vmMetal, 0, 0.005, -0.18));                            // magazine tube
   g.add(vmCyl(0.018, 0.02, vmDark, 0, 0.005, -0.32));                             // tube cap
-  g.add(vmBox(0.065, 0.085, 0.22, vmBlue, 0, 0.03, 0.08));                        // receiver
+  g.add(vmProf([[-0.03, -0.0125, 0.006], [-0.03, 0.0725, 0.012], [0.12, 0.0725, 0.014], [0.19, 0.062, 0.016], [0.19, -0.0125, 0.008]], 0.065, 0.014, vmBlue)); // rounded receiver
   g.add(vmBox(0.067, 0.03, 0.07, vmDark, 0, 0.045, 0.03));                        // ejection port
   g.add(vmBox(0.012, 0.035, 0.016, vmDark, 0, 0.06, 0.2, 0.5));                   // exposed hammer
-  pump.add(vmBox(0.058, 0.058, 0.17, vmWood, 0, 0, -0.15));                       // slide handle
+  pump.add(vmRound(0.058, 0.058, 0.17, 0.026, vmWood, 0, 0, -0.15));              // slide handle
   for (let i = 0; i < 5; i++) pump.add(vmBox(0.06, 0.06, 0.006, vmDark, 0, 0, -0.215 + i * 0.03)); // grooves
   g.add(pump);
-  g.add(vmBox(0.05, 0.13, 0.07, vmWood, 0, -0.08, 0.205, -0.35));                 // cut-down pistol grip
-  g.add(vmBox(0.056, 0.016, 0.075, vmDark, 0, -0.145, 0.228, -0.35));             // butt cap
+  g.add(vmProf([[0.13, -0.005, 0.01], [0.19, 0.055, 0.012], [0.228, 0.05, 0.014], [0.247, 0.01, 0.02], [0.262, -0.129, 0.012], [0.194, -0.153, 0.01], [0.15, -0.031, 0.016]], 0.05, 0.011, vmWood)); // wooden pistol-grip stock rising into the back of the receiver
+  g.add(vmRound(0.054, 0.016, 0.075, 0.007, vmDark, 0, -0.145, 0.228, -0.35));     // butt cap
   vmGuard(g, -0.04, 0.07, 0.028);
   const bead = new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 8), vmDot);
   bead.position.set(0, 0.077, -0.35); g.add(bead);                                // front bead (top = sight line)
@@ -2769,18 +2793,17 @@ function makeRifleModel() {
   const g = new THREE.Group(), bolt = new THREE.Group(), mag = new THREE.Group();
   g.add(vmCyl(0.011, 0.44, vmMetal, 0, 0.05, -0.28));                             // barrel
   g.add(vmCyl(0.014, 0.015, vmDark, 0, 0.05, -0.495));                            // muzzle
-  g.add(vmBox(0.05, 0.045, 0.26, vmWood, 0, 0.022, -0.17));                       // handguard
+  g.add(vmProf([[-0.3, 0.003, 0.012], [-0.3, 0.043, 0.016], [-0.04, 0.045, 0.014], [-0.04, 0.0, 0.008]], 0.05, 0.016, vmWood)); // rounded handguard
   g.add(vmBox(0.056, 0.062, 0.012, vmDark, 0, 0.032, -0.3));                      // barrel band
   g.add(vmBox(0.02, 0.012, 0.02, vmDark, 0, 0.062, -0.465));                      // front sight base
   g.add(vmBox(0.006, 0.026, 0.008, vmDark, 0, 0.0715, -0.465));                   // front post (top = sight line)
   g.add(vmBox(0.004, 0.03, 0.008, vmDark, -0.011, 0.07, -0.465));                 // protective wings
   g.add(vmBox(0.004, 0.03, 0.008, vmDark, 0.011, 0.07, -0.465));
-  g.add(vmBox(0.05, 0.05, 0.19, vmBlue, 0, 0.03, 0.035));                         // receiver
+  g.add(vmProf([[-0.06, 0.005, 0.006], [-0.06, 0.055, 0.01], [0.13, 0.055, 0.012], [0.13, 0.005, 0.006]], 0.05, 0.01, vmBlue)); // receiver
   g.add(vmBox(0.052, 0.02, 0.07, vmDark, 0, 0.035, 0.02));                        // ejection port
   bolt.add(vmBox(0.016, 0.014, 0.03, vmSteel, 0.036, 0.04, 0.03));                // operating slide handle
-  g.add(vmBox(0.052, 0.045, 0.2, vmWood, 0, -0.018, 0.04));                       // stock fore part
-  g.add(vmBox(0.05, 0.08, 0.26, vmWood, 0, 0, 0.27));                             // stock
-  g.add(vmBox(0.052, 0.1, 0.025, vmDark, 0, -0.01, 0.41));                        // butt plate
+  g.add(vmProf([[-0.06, 0.004, 0.008], [0.13, 0.004, 0.004], [0.13, 0.038, 0.012], [0.34, 0.042, 0.02], [0.405, 0.045, 0.014], [0.408, -0.062, 0.01], [0.31, -0.05, 0.03], [0.22, -0.042, 0.03], [0.12, -0.047, 0.012], [-0.06, -0.04, 0.01]], 0.052, 0.012, vmWood)); // one shaped stock: fore-end, wrist, comb and butt
+  g.add(vmRound(0.052, 0.1, 0.025, 0.008, vmDark, 0, -0.01, 0.4145));             // butt plate
   g.add(vmBox(0.016, 0.016, 0.022, vmDark, 0, 0.063, 0.115));                     // aperture sight base
   vmRing(g, 0.013, 0.004, vmDark, 0, 0.085, 0.115);                               // aperture (centre = sight line)
   vmGuard(g, -0.062, 0.02, 0.026);
@@ -2904,10 +2927,6 @@ function detailShotgun(g) {
   const gp = new THREE.Group(); gp.position.set(0, -0.08, 0.205); gp.rotation.x = -0.35; g.add(gp);
   vdB(gp, 0.0012, 0.1, 0.052, vmChecker, 0.0256, 0, 0); vdB(gp, 0.0012, 0.1, 0.052, vmChecker, -0.0256, 0, 0);
   vdB(gp, 0.05, 0.1, 0.0016, vmLeather, 0, 0, 0.0345);                                                     // leather back strap
-  // side saddle: three shells in a leather holder on the left of the receiver
-  vdB(g, 0.004, 0.075, 0.13, vmLeather, -0.0365, 0.012, 0.125);
-  for (let i = 0; i < 3; i++) { const sy = 0.038 - i * 0.026; vdC(g, 0.0095, 0.052, vmHull, -0.046, sy, 0.128, 'z', 14); vdC(g, 0.0098, 0.014, vmBrass, -0.046, sy, 0.152, 'z', 14); vdC(g, 0.0085, 0.003, vmBrass, -0.046, sy, 0.1, 'z', 12); }
-  vdC(g, 0.0035, 0.01, vmSteel, -0.0395, 0.012, 0.185, 'x', 8);                                            // holder rivet
   vdT(g, 0.01, 0.002, vmSteel, 0, -0.152, 0.236, 'x', 12);                                                 // sling swivel
 }
 function detailGrenade(g) {
